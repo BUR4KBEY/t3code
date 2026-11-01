@@ -37,5 +37,11 @@ fi
 
 sed -i -e "s/^pkgver=.*/pkgver=$new_pkgver/" -e 's/^pkgrel=.*/pkgrel=1/' PKGBUILD
 updpkgsums
-git -C "$repo" commit --quiet -m "chore(packaging): build on $new_tag" -- PKGBUILD
+if command -v nix >/dev/null; then
+  ../nix/update-hash.sh
+else
+  echo 'nix not found; run packaging/nix/update-hash.sh before you push.' >&2
+fi
+git -C "$repo" commit --quiet -m "chore(packaging): build on $new_tag" -- \
+  packaging/fork/PKGBUILD packaging/nix/t3-server.nix
 echo "main is on $new_tag. Push with: git push --force-with-lease origin main"
