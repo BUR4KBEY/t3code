@@ -1662,7 +1662,8 @@ export function threadShellFromProjection(
       projection.providerThreads,
       projection.thread.activeProviderThreadId,
     ),
-    agentDevenv: activeProviderDevenvForShell(
+    agentDevenv: providerDevenvForShell(
+      projection.thread.id,
       projection.providerThreads,
       projection.thread.activeProviderThreadId,
     ),
@@ -1717,14 +1718,17 @@ function activeProviderGoalForShell(
   return providerThreads.find((thread) => thread.id === activeProviderThreadId)?.goal ?? null;
 }
 
-function activeProviderDevenvForShell(
+/** Provider-native subagent threads have no active provider thread; their own one carries it. */
+function providerDevenvForShell(
+  threadId: ThreadId,
   providerThreads: ReadonlyArray<OrchestrationV2ThreadProjection["providerThreads"][number]>,
   activeProviderThreadId: OrchestrationV2ThreadProjection["thread"]["activeProviderThreadId"],
 ): OrchestrationV2ThreadShell["agentDevenv"] {
-  return (
-    providerThreads.find((thread) => thread.id === activeProviderThreadId)?.nativeMetadata
-      ?.agentDevenv ?? null
-  );
+  const providerThread =
+    activeProviderThreadId === null
+      ? providerThreads.findLast((thread) => thread.appThreadId === threadId)
+      : providerThreads.find((thread) => thread.id === activeProviderThreadId);
+  return providerThread?.nativeMetadata?.agentDevenv ?? null;
 }
 
 function isSilentRunForShell(
@@ -6882,7 +6886,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
           ),
-          agentDevenv: activeProviderDevenvForShell(
+          agentDevenv: providerDevenvForShell(
+            thread.id,
             providerThreadsByThreadId.get(thread.id) ?? [],
             thread.activeProviderThreadId,
           ),

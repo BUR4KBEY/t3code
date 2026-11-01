@@ -3181,7 +3181,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (childSessionId !== null && subagent.childSessionId === null) {
             subagent.childSessionId = childSessionId;
             context.subagentsBySessionId.set(childSessionId, subagent);
-            const providerThread = makeProviderThread({
+            const madeProviderThread = makeProviderThread({
               driver,
               providerInstanceId: context.input.modelSelection.instanceId,
               idAllocator,
@@ -3195,6 +3195,18 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               },
               now,
             });
+            // Child sessions live in this agent process; its devenv was read at turn start.
+            const parentDevenv = context.nativeMetadata?.agentDevenv;
+            const providerThread =
+              parentDevenv === undefined
+                ? madeProviderThread
+                : {
+                    ...madeProviderThread,
+                    nativeMetadata: {
+                      ...madeProviderThread.nativeMetadata,
+                      agentDevenv: parentDevenv,
+                    },
+                  };
             subagent.task = { ...subagent.task, providerThreadId: providerThread.id };
             yield* Ref.update(providerThreadByNativeSessionId, (current) =>
               new Map(current).set(childSessionId, providerThread),

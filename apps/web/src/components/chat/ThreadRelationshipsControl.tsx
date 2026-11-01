@@ -393,7 +393,6 @@ export function ThreadRelationshipsPanel(props: {
   const relationshipShells = useThreadRelationshipShells(ref);
   const hiddenKeys = useHiddenThreadKeys();
   const hidingAnywhere = useAnyEnvironmentHiding();
-  const currentDevenv = useQuietThreadShell(ref)?.agentDevenv ?? null;
   const allProjects = useProjects();
   const archived = useArchivedThreadSnapshots([props.environmentId]);
   const archivedShells = archived.snapshots.find(
@@ -701,13 +700,7 @@ export function ThreadRelationshipsPanel(props: {
       ? "group-hover:opacity-0 group-focus-within:opacity-0 pointer-coarse:opacity-0 [@media(hover:none)]:opacity-0"
       : "";
     const project = projects.find((project) => project.id === node?.thread?.projectId);
-    // Provider-native subagents run inside this thread's agent process, so they share its shell.
-    const rowDevenv = !props.showDevenv
-      ? null
-      : (node?.thread?.agentDevenv ??
-        (!isParent && node?.thread && isProviderNativeSubagentThread(node.thread)
-          ? currentDevenv
-          : null));
+    const rowDevenv = props.showDevenv ? (node?.thread?.agentDevenv ?? null) : null;
     const relationshipHint = `Open ${relationship.toLowerCase()} in this chat`;
     const RelationshipPopup = agent ? ThreadHoverCardPopup : TooltipPopup;
     const relationshipTooltip = agent ? (

@@ -1493,7 +1493,7 @@ describe("AcpAdapterV2", () => {
               mockAgentPath: yield* path.fromFileUrl(
                 new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
               ),
-              environment: { T3_ACP_IDLE_ERROR: details },
+              environment: { T3_ACP_IDLE_ERROR: details, DEVSHELL_NAME: "idle-error-shell" },
             }),
           },
         });
@@ -1541,6 +1541,18 @@ describe("AcpAdapterV2", () => {
         assert.isTrue(
           failed.childTurnsContinue,
           "the run keeps ingesting work that outlives the failed prompt",
+        );
+        const childProviderThread = failedEvents.find(
+          (event) =>
+            event.type === "provider_thread.updated" &&
+            event.providerThread.nativeThreadRef?.nativeId === childSessionId,
+        );
+        assert.deepEqual(
+          childProviderThread?.type === "provider_thread.updated"
+            ? childProviderThread.providerThread.nativeMetadata?.agentDevenv
+            : undefined,
+          { name: "idle-error-shell" },
+          "a child session records the devenv read from the agent process that hosts it",
         );
         const lateSubagent = yield* runtime.events.pipe(
           Stream.filter(
