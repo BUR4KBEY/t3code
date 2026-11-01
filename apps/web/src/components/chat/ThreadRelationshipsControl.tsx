@@ -78,6 +78,7 @@ import { threadEnvironment } from "../../state/threads";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentElapsed } from "./AgentElapsed";
+import { AgentDevenvPill } from "./AgentDevenv";
 import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadRelationshipIcon";
 import { ThreadLineageWorkflowRow } from "./ThreadLineageWorkflowRow";
 import { openSideChatTab } from "../../lib/sideChatPane";
@@ -383,6 +384,7 @@ export function ThreadRelationshipsPanel(props: {
   readonly threadId: ThreadId;
   readonly showLineage: boolean;
   readonly showSideChats: boolean;
+  readonly showDevenv: boolean;
 }) {
   const ref = scopeThreadRef(props.environmentId, props.threadId);
   const projection = useThreadProjection(ref)?.projection ?? null;
@@ -391,6 +393,7 @@ export function ThreadRelationshipsPanel(props: {
   const relationshipShells = useThreadRelationshipShells(ref);
   const hiddenKeys = useHiddenThreadKeys();
   const hidingAnywhere = useAnyEnvironmentHiding();
+  const currentDevenv = useQuietThreadShell(ref)?.agentDevenv ?? null;
   const allProjects = useProjects();
   const archived = useArchivedThreadSnapshots([props.environmentId]);
   const archivedShells = archived.snapshots.find(
@@ -698,6 +701,13 @@ export function ThreadRelationshipsPanel(props: {
       ? "group-hover:opacity-0 group-focus-within:opacity-0 pointer-coarse:opacity-0 [@media(hover:none)]:opacity-0"
       : "";
     const project = projects.find((project) => project.id === node?.thread?.projectId);
+    // Provider-native subagents run inside this thread's agent process, so they share its shell.
+    const rowDevenv = !props.showDevenv
+      ? null
+      : (node?.thread?.agentDevenv ??
+        (!isParent && node?.thread && isProviderNativeSubagentThread(node.thread)
+          ? currentDevenv
+          : null));
     const relationshipHint = `Open ${relationship.toLowerCase()} in this chat`;
     const RelationshipPopup = agent ? ThreadHoverCardPopup : TooltipPopup;
     const relationshipTooltip = agent ? (
@@ -736,6 +746,7 @@ export function ThreadRelationshipsPanel(props: {
             {threadTitle}
           </span>
         </span>
+        {rowDevenv ? <AgentDevenvPill devenv={rowDevenv} /> : null}
         {agent ? null : (
           <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         )}

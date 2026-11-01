@@ -39,6 +39,8 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { AgentDevenvRow } from "./AgentDevenv";
+import { useQuietThreadShell } from "../../state/entities";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -94,6 +96,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
+  const agentDevenv =
+    useQuietThreadShell(props.draftId ? null : activeThreadRef)?.agentDevenv ?? null;
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -151,6 +155,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         // Section flags follow the rows that will render, so no empty section steals the divider rule.
         const show = {
           environment: density === "full" && visible.environment,
+          devenv: density !== "essential" && visible.devenv && agentDevenv !== null,
           openIn: density !== "essential" && visible.openIn && props.showOpenInPicker,
           scripts: visible.scripts && props.activeProjectScripts !== undefined,
           branch: props.gitCwd !== null && props.isGitRepo && visible.branch,
@@ -162,7 +167,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         return (
           <>
             <div className="group/details-items">
-              {show.environment || show.openIn || show.scripts ? (
+              {show.environment || show.devenv || show.openIn || show.scripts ? (
                 <ThreadDetailsSection
                   headingId="thread-details-workspace-heading"
                   title="Workspace"
@@ -183,6 +188,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         {...branchToolbarProps}
                       />
                     ) : null}
+
+                    {show.devenv && agentDevenv ? <AgentDevenvRow devenv={agentDevenv} /> : null}
 
                     {show.openIn ? (
                       <OpenInPicker
@@ -255,6 +262,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   threadId={props.threadId}
                   showLineage={visible.lineage}
                   showSideChats={visible.sideChats}
+                  showDevenv={visible.devenv}
                 />
               ) : null}
 

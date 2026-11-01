@@ -81,6 +81,7 @@ it.each([
         threadId={threadId}
         showLineage
         showSideChats
+        showDevenv
       />
     </ToastProvider>,
   );
@@ -114,6 +115,7 @@ it.each([
         threadId={threadId}
         showLineage
         showSideChats
+        showDevenv
       />
     </ToastProvider>,
     { router: "/environment/fork" },
@@ -183,6 +185,7 @@ it("opens an idle child from Lineage when its shell has not been loaded", async 
       threadId={projection.thread.id}
       showLineage
       showSideChats
+      showDevenv
     />,
   );
   await screen.getByRole("button", { name: /Previous agents/ }).click();

@@ -185,9 +185,12 @@ function SidebarProviderStack(props: {
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
 }) {
   const stack = resolveThreadProviderStack(props.thread);
+  const devenv = props.thread.agentDevenv ? (
+    <DevenvIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
+  ) : null;
   const currentInstanceId = stack[stack.length - 1]!;
   const currentEntry = props.providerEntryByInstanceId.get(currentInstanceId) ?? null;
-  if (currentEntry === null) return null;
+  if (currentEntry === null) return devenv;
   const showInstanceBadge = shouldShowInstanceBadge(
     currentEntry,
     props.providerEntryByInstanceId.values(),
@@ -204,9 +207,6 @@ function SidebarProviderStack(props: {
       iconClassName="opacity-60"
     />
   );
-  const devenv = props.thread.agentDevenv ? (
-    <DevenvIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
-  ) : null;
   if (stack.length === 1) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5">
