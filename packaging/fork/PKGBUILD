@@ -53,12 +53,8 @@ options=('!debug' '!strip')
 _upstream_version="${pkgver/_nightly./-nightly.}"
 _appimage="T3-Code-${_upstream_version}-x86_64.AppImage"
 _repo_root="${startdir%/packaging/fork}"
-source=(
-  "$_appimage::https://github.com/pingdotgg/t3code/releases/download/v${_upstream_version}/$_appimage"
-  "t3code::git+file://${_repo_root}#branch=main"
-)
-sha256sums=('6bcde5c7f7ce9a01ccdfb7e326d838a4517c74330f174ec2071d0326166f88b3'
-            'SKIP')
+source=("$_appimage::https://github.com/pingdotgg/t3code/releases/download/v${_upstream_version}/$_appimage")
+sha256sums=('6bcde5c7f7ce9a01ccdfb7e326d838a4517c74330f174ec2071d0326166f88b3')
 
 # Runs a command with the Node and pnpm versions the checkout pins.
 _toolchain() {
@@ -80,11 +76,16 @@ prepare() {
 
   # The fork must sit on the nightly whose AppImage we unpack; otherwise the
   # rebuilt JavaScript and the native payload come from different releases.
-  cd "$srcdir/t3code"
-  if ! git merge-base --is-ancestor "v${_upstream_version}" HEAD 2>/dev/null; then
+  if ! git -C "$_repo_root" merge-base --is-ancestor "v${_upstream_version}" main; then
     echo "main is not based on v${_upstream_version}. Run sync-upstream.sh." >&2
     return 1
   fi
+
+  # Export committed main rather than cloning: a clone would need every
+  # object in history, and git archive only needs main's tree.
+  rm -rf "$srcdir/t3code"
+  mkdir "$srcdir/t3code"
+  git -C "$_repo_root" archive main | tar -x -C "$srcdir/t3code"
 }
 
 # Prints the first match of a PCRE \K pattern in the given files.
