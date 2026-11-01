@@ -7,6 +7,9 @@
     pkgs.pnpm_12
     pkgs.jq
     pkgs.git
+    # The desktop build compiles a small browser-secret helper against libsecret.
+    pkgs.pkg-config
+    pkgs.libsecret
   ];
 
   # Keep pnpm's home, store, and cache inside this checkout instead of ~.
