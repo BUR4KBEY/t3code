@@ -18,7 +18,8 @@ if [[ $(git -C "$repo" branch --show-current) != main ]]; then
 fi
 
 git -C "$repo" fetch --quiet --tags upstream
-new_tag=$(git -C "$repo" tag -l 'v*-nightly.*' --sort=-creatordate | head -n 1)
+new_tag=$(git -C "$repo" for-each-ref --count=1 --sort=-creatordate \
+  --format='%(refname:short)' 'refs/tags/v*-nightly.*')
 current=$(sed -n 's/^pkgver=//p' PKGBUILD)
 old_tag="v${current/_nightly./-nightly.}"
 
