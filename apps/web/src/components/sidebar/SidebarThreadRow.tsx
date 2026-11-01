@@ -74,6 +74,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { DevenvIcon } from "../Icons";
 import {
   animateSidebarLayoutChanges,
   hasUnseenCompletion,
@@ -203,11 +204,20 @@ function SidebarProviderStack(props: {
       iconClassName="opacity-60"
     />
   );
+  const devenv = props.thread.agentDevenv ? (
+    <DevenvIcon aria-hidden className="size-3 shrink-0 text-sidebar-muted-foreground" />
+  ) : null;
   if (stack.length === 1) {
-    return <span className="inline-flex shrink-0 items-center">{current}</span>;
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1.5">
+        {devenv}
+        {current}
+      </span>
+    );
   }
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
+      {devenv}
       {stack.slice(0, -1).map((instanceId) => {
         const entry = props.providerEntryByInstanceId.get(instanceId);
         if (entry === undefined) return null;
@@ -324,6 +334,14 @@ function SidebarThreadTooltip({
               {showInstanceBadge && providerEntry
                 ? `${modelLabel} · ${providerEntry.displayName}`
                 : modelLabel}
+            </div>
+          </div>
+        ) : null}
+        {thread.agentDevenv ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <DevenvIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 truncate text-foreground/75">
+              {thread.agentDevenv.name ? `devenv · ${thread.agentDevenv.name}` : "devenv"}
             </div>
           </div>
         ) : null}

@@ -78,6 +78,25 @@ export const GitIcon: Icon = (props) => (
   </svg>
 );
 
+// devenv logo (cachix/devenv docs/public/favicon.svg, Apache-2.0). The dark
+// squares use currentColor so the mark stays visible in dark themes.
+export const DevenvIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 129 97">
+    <g fill="#425C82">
+      <path d="M66.34 0.31V29.8H95.83V0.31Z" />
+      <path d="M99.51 33.49V62.97H129V33.49Z" />
+      <path d="M66.34 33.49V62.97H95.83V33.49Z" />
+      <path d="M99.51 66.66V96.14H129V66.66Z" />
+    </g>
+    <g fill="currentColor">
+      <path d="M66.34 66.66V96.14H95.83V66.66Z" />
+      <path d="M33.17 66.66V96.14H62.66V66.66Z" />
+      <path d="M0 66.66V96.14H29.49V66.66Z" />
+      <path d="M33.17 33.49V62.97H62.66V33.49Z" />
+    </g>
+  </svg>
+);
+
 export const JujutsuIcon: Icon = (props) => {
   const groupId = `${useId().replaceAll(":", "")}-jj-a`;
 

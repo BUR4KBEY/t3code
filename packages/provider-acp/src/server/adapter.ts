@@ -110,6 +110,7 @@ import {
   flattenSelectChoices,
 } from "./sessionConfig.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import { readAgentDevenv } from "./agentProcessEnvironment.ts";
 import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
@@ -7949,13 +7950,20 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const rememberedNativeMetadata = (yield* Ref.get(nativeMetadataBySessionId)).get(
               requestedSessionId,
             );
-            const initialNativeMetadata =
+            const rememberedOrPersistedNativeMetadata =
               rememberedNativeMetadata === undefined
                 ? (turnInput.providerThread.nativeMetadata ?? null)
                 : {
                     ...turnInput.providerThread.nativeMetadata,
                     ...rememberedNativeMetadata,
                   };
+            // Re-read on every turn: a restarted agent that lost its devshell
+            // must clear the old value rather than keep showing it.
+            const agentDevenv = readAgentDevenv(runtime.processId);
+            const initialNativeMetadata =
+              agentDevenv === undefined
+                ? rememberedOrPersistedNativeMetadata
+                : { ...rememberedOrPersistedNativeMetadata, agentDevenv };
             if (initialNativeMetadata !== null) {
               yield* Ref.update(nativeMetadataBySessionId, (current) =>
                 new Map(current).set(requestedSessionId, initialNativeMetadata),

@@ -1037,6 +1037,13 @@ export const OrchestrationV2PendingBackgroundTask = kindUnionWithFallback(
 );
 export type OrchestrationV2PendingBackgroundTask = typeof OrchestrationV2PendingBackgroundTask.Type;
 
+/** A devenv shell seen in the agent process's own environment at turn start. */
+export const OrchestrationV2AgentDevenv = Schema.Struct({
+  /** `DEVSHELL_NAME`, or null when the shell does not set one. */
+  name: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type OrchestrationV2AgentDevenv = typeof OrchestrationV2AgentDevenv.Type;
+
 export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   title: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1046,6 +1053,8 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   claudeAttachmentBudget: Schema.optional(
     Schema.Struct({ bytesUsed: NonNegativeInt, pagesUsed: NonNegativeInt }),
   ),
+  /** `null`: the agent runs outside devenv. Absent: not read yet. */
+  agentDevenv: Schema.optional(Schema.NullOr(OrchestrationV2AgentDevenv)),
 });
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;
@@ -2120,6 +2129,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
+  /** The active provider thread's `nativeMetadata.agentDevenv`. Absent from older servers. */
+  agentDevenv: Schema.optional(Schema.NullOr(OrchestrationV2AgentDevenv)),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,

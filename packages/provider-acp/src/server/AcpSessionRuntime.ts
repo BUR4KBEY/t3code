@@ -1125,6 +1125,12 @@ export class AcpSessionRuntime extends Context.Service<
     readonly start: () => Effect.Effect<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
     readonly getEvents: () => Stream.Stream<AcpSessionRuntimeEvent, never>;
     readonly drainEvents: Effect.Effect<void>;
+    /**
+     * PID of the spawned agent. Both T3 launch wrappers (AgentScope and the
+     * Linux cgroup wrapper) exec into the agent, so after `initialize` this is
+     * the agent process itself.
+     */
+    readonly processId: number | undefined;
     readonly getModeState: Effect.Effect<AcpSessionModeState | undefined>;
     readonly getConfigOptions: Effect.Effect<ReadonlyArray<EffectAcpSchema.SessionConfigOption>>;
     /** The current configuration options, then each later change. */
@@ -2440,6 +2446,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     start: () => start,
     getEvents: () => Stream.fromQueue(eventQueue),
     drainEvents,
+    processId: child.pid === undefined ? undefined : Number(child.pid),
     getModeState: Ref.get(modeStateRef),
     getConfigOptions: SubscriptionRef.get(configOptionsRef),
     configOptionChanges: SubscriptionRef.changes(configOptionsRef),

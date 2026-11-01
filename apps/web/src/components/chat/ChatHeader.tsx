@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type OrchestrationV2AgentDevenv,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -31,6 +32,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { DevenvIcon } from "../Icons";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -48,6 +50,8 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
   activeThreadLinkOrigin?: string | null | undefined;
+  /** devenv shell from the agent process environment; null hides the chip. */
+  agentDevenv?: OrchestrationV2AgentDevenv | null | undefined;
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
@@ -75,6 +79,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
   activeThreadLinkOrigin,
+  agentDevenv,
   isServerThread,
   activeProject,
   parentThreadLink,
@@ -430,6 +435,19 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {agentDevenv ? (
+        <Tooltip>
+          <TooltipTrigger render={<Badge variant="outline" size="sm" className="shrink-0" />}>
+            <DevenvIcon aria-hidden className="size-3.5" />
+            {agentDevenv.name}
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {agentDevenv.name
+              ? `The agent process runs in devenv with DEVSHELL_NAME=${agentDevenv.name}`
+              : "The agent process runs in devenv"}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       {isServerThread ? <GuestShareIndicator threadRef={activeThreadRef} /> : null}
     </div>
   );
