@@ -26,9 +26,9 @@ Existing threads pick up the indicator on their next message.
 
 `packaging/fork/PKGBUILD` builds a package named `t3code-nightly-patched`. It replaces `t3code-nightly-bin`.
 
-The package takes the official nightly AppImage named by `pkgver` and rebuilds only its JavaScript (server, web client, Electron main) from the committed `main` branch of your checkout. The native helpers and Electron come from the AppImage, so you need no Rust or C toolchain. Node and pnpm are fetched by [mise](https://mise.jdx.dev) at the versions the source pins and are not put on your PATH.
+The package takes the official nightly AppImage named by `pkgver` and rebuilds only its JavaScript (server, web client, Electron main) from the committed `main` branch of your checkout. The native helpers and Electron come from the AppImage, so you need no Rust or C toolchain. Node and pnpm come from the checkout's devenv shell (see below).
 
-Build dependencies: `git`, `jq`, `mise`.
+Build dependencies: `git` and [devenv](https://devenv.sh/getting-started/). devenv is not a pacman package, so the PKGBUILD checks for it itself.
 
 ```sh
 git clone git@github.com:BUR4KBEY/t3code.git
@@ -55,13 +55,14 @@ It expects a remote named `upstream` pointing at `https://github.com/pingdotgg/t
 
 ## Working on the fork
 
-Each fork change is an ordinary commit on `main`. Keep them few and self-contained so rebases stay cheap, and keep fork-only files under `packaging/fork/` so they never collide with upstream paths.
+Each fork change is an ordinary commit on `main`. Keep them few and self-contained so rebases stay cheap, and keep fork-only files under `packaging/fork/` so they never collide with upstream paths. The exceptions are `devenv.nix`, `devenv.yaml`, `devenv.lock`, and a few lines at the end of `.gitignore`, which devenv needs at the repository root.
+
+`devenv shell` gives you the Node version `package.json` pins, from the `cachix/devenv-nixpkgs` rolling channel, and pnpm, which switches itself to the `packageManager` version. pnpm's home, store, and cache live under `.devenv/state`, so nothing is written to your home directory. If upstream bumps `engines.node` past what the channel has, `devenv test` fails; run `devenv update` and try again.
 
 To run a change before packaging it, use upstream's dev server with a separate data directory so it doesn't touch your real `~/.t3`:
 
 ```sh
-mise x node@$(jq -r .engines.node package.json) pnpm@$(jq -r '.packageManager|sub("^pnpm@";"")' package.json) -- \
-  sh -c 'pnpm install && pnpm dev --home-dir ~/.t3-dev'
+devenv shell -- sh -c 'pnpm install && pnpm dev --home-dir ~/.t3-dev'
 ```
 
 The package build reads committed `main`, not your working tree, so commit before running `makepkg`.

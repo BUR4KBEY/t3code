@@ -1,8 +1,9 @@
 # Installs this fork: the official T3 Code nightly AppImage named by pkgver,
 # with its JavaScript (server, web client, Electron main) rebuilt from the
 # committed `main` branch of this checkout. Native helpers stay from the
-# AppImage, so no Rust or C toolchain is needed. Node and pnpm come from mise
-# for the build only; nothing is activated on PATH.
+# AppImage, so no Rust or C toolchain is needed. Node and pnpm come from the
+# checkout's devenv shell; devenv is not a pacman package, so install it
+# yourself (https://devenv.sh).
 #
 # pkgver must name the upstream nightly that `main` is rebased on;
 # sync-upstream.sh keeps the two in step.
@@ -45,7 +46,7 @@ depends=(
   'xdg-utils'
   'zlib'
 )
-makedepends=('git' 'jq' 'mise')
+makedepends=('git')
 provides=("t3code-nightly=$pkgver")
 conflicts=('t3code-nightly' 't3code' 't3code-nightly-bin')
 options=('!debug' '!strip')
@@ -56,12 +57,15 @@ _repo_root="${startdir%/packaging/fork}"
 source=("$_appimage::https://github.com/pingdotgg/t3code/releases/download/v${_upstream_version}/$_appimage")
 sha256sums=('6bcde5c7f7ce9a01ccdfb7e326d838a4517c74330f174ec2071d0326166f88b3')
 
-# Runs a command with the Node and pnpm versions the checkout pins.
+# Runs a command in the checkout's devenv shell (pinned Node and pnpm, pnpm
+# store under the checkout's .devenv/state) without leaving the current dir.
 _toolchain() {
-  local node pnpm
-  node=$(jq -r '.engines.node' "$srcdir/t3code/package.json")
-  pnpm=$(jq -r '.packageManager | sub("^pnpm@"; "")' "$srcdir/t3code/package.json")
-  mise exec "node@$node" "pnpm@$pnpm" -- "$@"
+  if ! command -v devenv >/dev/null; then
+    echo 'devenv is required: https://devenv.sh/getting-started/' >&2
+    return 1
+  fi
+  (cd "$_repo_root" && devenv --no-tui shell --no-reload -- \
+    sh -c 'cd "$1" && shift && exec "$@"' sh "$OLDPWD" "$@")
 }
 
 prepare() {
