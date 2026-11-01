@@ -202,6 +202,8 @@ export ELECTRON_RUN_AS_NODE=1
 exec /opt/$pkgname/t3code /opt/$pkgname/resources/app.asar/apps/server/dist/bin.mjs "\$@"
 EOF
 
+  install -Dm755 "$srcdir/t3code/packaging/fork/omp-devenv" "$pkgdir/usr/bin/omp-devenv"
+
   # Icon lookup only sees sizes registered in hicolor's index.theme (max 512x512).
   local icon size_dir
   for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/t3code.png; do

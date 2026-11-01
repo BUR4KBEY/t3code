@@ -16,7 +16,9 @@ When the agent process runs inside a [devenv](https://devenv.sh) shell, T3 shows
 
 The server reads `DEVENV_ROOT` and `DEVSHELL_NAME` from `/proc/<pid>/environ` of the ACP agent at the start of every turn. That is the environment the agent was started with, not something derived from the project folder, so the indicator only appears when the launcher really entered the shell. If the launcher fails, the indicator disappears on the next turn. Linux only; on other systems it never shows.
 
-The agent has to be started inside the shell. For omp, use a wrapper such as [omp-devenv](https://github.com/BUR4KBEY/devbox-nixos/blob/main/dotfiles/bin/omp-devenv) as the provider command (Settings → Providers → OMP). The wrapper must keep stdout clean: ACP clients end the session on the first line that isn't JSON-RPC, and `enterShell` hooks print to stdout.
+The agent has to be started inside the shell. For omp, the package installs [`omp-devenv`](./packaging/fork/omp-devenv) to `/usr/bin`; set the OMP provider's command to `omp-devenv` with arguments `acp` (Settings → Providers → OMP). In a project with `devenv.nix` or `devenv.yaml` it runs omp inside `devenv shell`, in a linked git worktree it uses the main checkout's devenv, and anywhere else it runs plain omp. `OMP_DEVENV_DEBUG=1` logs its decisions to `~/.local/state/omp-devenv/debug.log`.
+
+A different wrapper works too, as long as it keeps stdout clean: ACP clients end the session on the first line that isn't JSON-RPC, and devenv `enterShell` hooks print to stdout. `omp-devenv` sends their output to stderr.
 
 Existing threads pick up the indicator on their next message.
 
