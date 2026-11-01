@@ -1,0 +1,227 @@
+# Installs this fork: the official T3 Code nightly AppImage named by pkgver,
+# with its JavaScript (server, web client, Electron main) rebuilt from the
+# committed `main` branch of this checkout. Native helpers stay from the
+# AppImage, so no Rust or C toolchain is needed. Node and pnpm come from mise
+# for the build only; nothing is activated on PATH.
+#
+# pkgver must name the upstream nightly that `main` is rebased on;
+# sync-upstream.sh keeps the two in step.
+
+pkgname=t3code-nightly-patched
+pkgver=0.1.7_nightly.20261031.4004
+pkgrel=1
+pkgdesc='T3 Code nightly with the BUR4KBEY fork changes'
+arch=('x86_64')
+url='https://github.com/BUR4KBEY/t3code'
+license=('MIT')
+depends=(
+  'alsa-lib'
+  'at-spi2-core'
+  'cairo'
+  'dbus'
+  'expat'
+  'gdk-pixbuf2'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'hicolor-icon-theme'
+  'libcups'
+  'libdrm'
+  'libgcc'
+  'libstdc++'
+  'libx11'
+  'libxcb'
+  'libxcomposite'
+  'libxdamage'
+  'libxext'
+  'libxfixes'
+  'libxkbcommon'
+  'libxrandr'
+  'mesa'
+  'nspr'
+  'nss'
+  'pango'
+  'systemd-libs'
+  'xdg-utils'
+  'zlib'
+)
+makedepends=('git' 'jq' 'mise')
+provides=("t3code-nightly=$pkgver")
+conflicts=('t3code-nightly' 't3code' 't3code-nightly-bin')
+options=('!debug' '!strip')
+
+_upstream_version="${pkgver/_nightly./-nightly.}"
+_appimage="T3-Code-${_upstream_version}-x86_64.AppImage"
+_repo_root="${startdir%/packaging/fork}"
+source=(
+  "$_appimage::https://github.com/pingdotgg/t3code/releases/download/v${_upstream_version}/$_appimage"
+  "t3code::git+file://${_repo_root}#branch=main"
+)
+sha256sums=('6bcde5c7f7ce9a01ccdfb7e326d838a4517c74330f174ec2071d0326166f88b3'
+            'SKIP')
+
+# Runs a command with the Node and pnpm versions the checkout pins.
+_toolchain() {
+  local node pnpm
+  node=$(jq -r '.engines.node' "$srcdir/t3code/package.json")
+  pnpm=$(jq -r '.packageManager | sub("^pnpm@"; "")' "$srcdir/t3code/package.json")
+  mise exec "node@$node" "pnpm@$pnpm" -- "$@"
+}
+
+prepare() {
+  chmod +x "$srcdir/$_appimage"
+  rm -rf "$srcdir/squashfs-root"
+  "$srcdir/$_appimage" --appimage-extract >/dev/null
+  if [[ ! -x "$srcdir/squashfs-root/AppRun" ||
+        ! -f "$srcdir/squashfs-root/resources/app.asar" ]]; then
+    echo 'The AppImage payload is missing AppRun or resources/app.asar.' >&2
+    return 1
+  fi
+
+  # The fork must sit on the nightly whose AppImage we unpack; otherwise the
+  # rebuilt JavaScript and the native payload come from different releases.
+  cd "$srcdir/t3code"
+  if ! git merge-base --is-ancestor "v${_upstream_version}" HEAD 2>/dev/null; then
+    echo "main is not based on v${_upstream_version}. Run sync-upstream.sh." >&2
+    return 1
+  fi
+}
+
+# Prints the first match of a PCRE \K pattern in the given files.
+_first_match() {
+  local pattern=$1
+  shift
+  grep -ohP "$pattern" "$@" | head -n 1
+}
+
+# Lists bundle files with content hashes masked, for comparing two builds.
+_bundle_files() {
+  (cd "$1" && find apps/server/dist apps/desktop/dist-electron -type f ! -name '*.map' |
+    sed -E 's/-[A-Za-z0-9_-]{8}\./-HASH./' | sort)
+}
+
+build() {
+  cd "$srcdir/t3code"
+  export CI=1 T3CODE_DEV_SEED=0
+  _toolchain pnpm install --frozen-lockfile
+
+  local resources="$srcdir/squashfs-root/resources"
+  local official="$srcdir/app-official" staged="$srcdir/app-staged"
+  local asar
+  asar=$(find node_modules/.pnpm -path '*/@electron+asar@*/node_modules/@electron/asar/bin/asar.mjs' |
+    sort -V | tail -n 1)
+  rm -rf "$official" "$staged"
+  _toolchain node "$asar" extract "$resources/app.asar" "$official"
+
+  # Release CI bakes the public T3 Connect (relay, Clerk, tracing) config into
+  # the bundle. Read the same values back out of the official build.
+  local server_bundle=("$official"/apps/server/dist/binCli-*.mjs)
+  local client_assets=("$official"/apps/server/dist/client/assets/*.js)
+  export GITHUB_REPOSITORY=pingdotgg/t3code
+  export T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_CLI_OAUTH_CLIENT_ID T3CODE_CLERK_JWT_TEMPLATE
+  export T3CODE_RELAY_URL T3CODE_TELEMETRY_CHANNEL
+  export T3CODE_RELAY_CLIENT_OTLP_TRACES_URL T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET
+  export T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN
+  T3CODE_CLERK_PUBLISHABLE_KEY=$(_first_match \
+    'buildTimeClerkPublishableKey = readBuildTimeValue\("\K[^"]+' "${server_bundle[@]}")
+  T3CODE_CLERK_CLI_OAUTH_CLIENT_ID=$(_first_match \
+    'buildTimeClerkCliOAuthClientId = readBuildTimeValue\("\K[^"]+' "${server_bundle[@]}")
+  T3CODE_RELAY_URL=$(_first_match \
+    'buildTimeRelayUrl = normalizeSecureRelayUrl\("\K[^"]+' "${server_bundle[@]}")
+  T3CODE_RELAY_CLIENT_OTLP_TRACES_URL=$(_first_match \
+    'tracesUrl: readBuildTimeValue\("\K[^"]+' "${server_bundle[@]}")
+  T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET=$(_first_match \
+    'tracesDataset: readBuildTimeValue\("\K[^"]+' "${server_bundle[@]}")
+  T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=$(_first_match \
+    'tracesToken: readBuildTimeValue\("\K[^"]+' "${server_bundle[@]}")
+  T3CODE_TELEMETRY_CHANNEL=$(_first_match '\btelemetryChannel = "\K[^"]+' "${server_bundle[@]}")
+  T3CODE_CLERK_JWT_TEMPLATE=$(_first_match 'clerkJwtTemplate:[\w$]+\(`\K[^`]+' "${client_assets[@]}")
+  local name
+  for name in T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_CLI_OAUTH_CLIENT_ID T3CODE_CLERK_JWT_TEMPLATE \
+    T3CODE_RELAY_URL T3CODE_TELEMETRY_CHANNEL T3CODE_RELAY_CLIENT_OTLP_TRACES_URL \
+    T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN; do
+    if [[ -z ${!name} ]]; then
+      echo "Could not read $name from the official bundle; its layout changed." >&2
+      return 1
+    fi
+  done
+
+  _toolchain node scripts/update-release-package-versions.ts "$_upstream_version"
+  APP_VERSION="$_upstream_version" _toolchain pnpm exec vp run build:desktop
+
+  # Swap the rebuilt JavaScript into the official app.asar.
+  cp -a "$official" "$staged"
+  rm -rf "$staged/apps/server/dist" "$staged/apps/desktop/dist-electron"
+  cp -a apps/server/dist "$staged/apps/server/dist"
+  cp -a apps/desktop/dist-electron "$staged/apps/desktop/dist-electron"
+  # Release archives ship without source maps or the Vite manifest, and the
+  # server build copies development favicons over the release ones.
+  find "$staged/apps" -name '*.map' -delete
+  rm -rf "$staged/apps/server/dist/client/.vite"
+  find "$official/apps/server/dist/client" -maxdepth 1 -type f \( -name '*.ico' -o -name '*.png' \) \
+    -exec cp -f -t "$staged/apps/server/dist/client" {} +
+
+  # A different file set means the build config drifted from release CI (for
+  # example a missing T3 Connect chunk). A patch that adds a module can also
+  # trip this; check the diff before relaxing it.
+  if ! diff -u <(_bundle_files "$official") <(_bundle_files "$staged"); then
+    echo 'The rebuilt bundle does not match the official file set.' >&2
+    return 1
+  fi
+
+  # Unpack the same native module directories the official archive unpacks.
+  local unpack_dirs
+  unpack_dirs=$(cd "$resources/app.asar.unpacked" &&
+    find node_modules -mindepth 1 -maxdepth 2 -type d \
+      \( -path 'node_modules/@*/*' -o \( -path 'node_modules/*' ! -name '@*' \) \) -prune -print |
+    paste -sd, -)
+  rm -rf "$srcdir/app.asar" "$srcdir/app.asar.unpacked"
+  _toolchain node "$asar" pack "$staged" "$srcdir/app.asar" --unpack-dir "{$unpack_dirs}"
+  rm -rf "$resources/app.asar" "$resources/app.asar.unpacked"
+  mv "$srcdir/app.asar" "$srcdir/app.asar.unpacked" "$resources/"
+}
+
+package() {
+  install -d "$pkgdir/opt/$pkgname"
+  cp -a --no-preserve=ownership "$srcdir/squashfs-root/." "$pkgdir/opt/$pkgname/"
+  chmod -R u=rwX,go=rX "$pkgdir/opt/$pkgname"
+  chmod 4755 "$pkgdir/opt/$pkgname/chrome-sandbox"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/t3code-nightly" <<EOF
+#!/bin/sh
+exec /opt/$pkgname/AppRun "\$@"
+EOF
+  ln -s t3code-nightly "$pkgdir/usr/bin/t3-code-nightly-desktop"
+
+  # The server CLI (`t3`) runs on the bundled Electron in Node mode, as the
+  # t3code-nightly-bin package installs it.
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/t3-nightly" <<EOF
+#!/bin/sh
+export ELECTRON_RUN_AS_NODE=1
+exec /opt/$pkgname/t3code /opt/$pkgname/resources/app.asar/apps/server/dist/bin.mjs "\$@"
+EOF
+
+  # Icon lookup only sees sizes registered in hicolor's index.theme (max 512x512).
+  local icon size_dir
+  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/t3code.png; do
+    size_dir="${icon%/apps/t3code.png}"
+    install -Dm644 "$icon" \
+      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/t3code-nightly.png"
+  done
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/t3code.desktop" <<'EOF'
+[Desktop Entry]
+Name=T3 Code Nightly
+Comment=Nightly desktop control surface for local coding agents
+Exec=t3code-nightly %U
+TryExec=t3code-nightly
+Terminal=false
+Type=Application
+Icon=t3code-nightly
+StartupWMClass=t3code
+Categories=Development;
+MimeType=x-scheme-handler/t3code;
+EOF
+
+  install -Dm644 "$srcdir/t3code/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

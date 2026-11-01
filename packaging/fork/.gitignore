@@ -1,0 +1,6 @@
+/src/
+/pkg/
+/t3code/
+*.AppImage
+*.pkg.tar.*
+*.log

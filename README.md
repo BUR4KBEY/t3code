@@ -1,153 +1,69 @@
-# T3 Code
+# T3 Code (BUR4KBEY fork)
 
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+A personal fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code), the desktop and web control surface for coding agents. For what T3 Code is, how to use it, and the official downloads, read the [upstream README](https://github.com/pingdotgg/t3code#readme). This file only covers how the fork differs.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, and fx. If they're set up on your computer, T3 Code can control them.
+The fork follows upstream nightly releases. `main` is the newest upstream nightly tag with this fork's commits on top, and it is rebased (and force-pushed) every time it moves to a newer nightly.
 
-## "Wait, what are you selling me?"
+## What the fork adds
 
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+### devenv indicator
 
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
+When the agent process runs inside a [devenv](https://devenv.sh) shell, T3 shows it in three places:
 
-## Installation
+- the thread header: the devenv logo and `DEVSHELL_NAME`
+- the sidebar row: the devenv logo next to the provider icon
+- the thread hover card: `devenv · DEVSHELL_NAME`, or `devenv` when the shell sets no name
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, Antigravity, and fx. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
-> - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
-> - fx: install [fx](https://fx.sh) and run `fx login` on the machine running the T3 Code server ([setup guide](./docs/user/providers-fx.md))
+The server reads `DEVENV_ROOT` and `DEVSHELL_NAME` from `/proc/<pid>/environ` of the ACP agent at the start of every turn. That is the environment the agent was started with, not something derived from the project folder, so the indicator only appears when the launcher really entered the shell. If the launcher fails, the indicator disappears on the next turn. Linux only; on other systems it never shows.
 
-### Command line
+The agent has to be started inside the shell. For omp, use a wrapper such as [omp-devenv](https://github.com/BUR4KBEY/devbox-nixos/blob/main/dotfiles/bin/omp-devenv) as the provider command (Settings → Providers → OMP). The wrapper must keep stdout clean: ACP clients end the session on the first line that isn't JSON-RPC, and `enterShell` hooks print to stdout.
 
-```bash
-curl -fsSL https://t3.codes/install.sh | sh
+Existing threads pick up the indicator on their next message.
+
+## Installing on Arch Linux
+
+`packaging/fork/PKGBUILD` builds a package named `t3code-nightly-patched`. It replaces `t3code-nightly-bin`.
+
+The package takes the official nightly AppImage named by `pkgver` and rebuilds only its JavaScript (server, web client, Electron main) from the committed `main` branch of your checkout. The native helpers and Electron come from the AppImage, so you need no Rust or C toolchain. Node and pnpm are fetched by [mise](https://mise.jdx.dev) at the versions the source pins and are not put on your PATH.
+
+Build dependencies: `git`, `jq`, `mise`.
+
+```sh
+git clone git@github.com:BUR4KBEY/t3code.git
+cd t3code/packaging/fork
+makepkg -Cf
+sudo pacman -U t3code-nightly-patched-*-x86_64.pkg.tar.zst
 ```
 
-On Windows, in PowerShell:
+The build stops if the rebuilt bundle's file list differs from the official one. That catches build settings drifting away from upstream's release CI. A change that adds a new bundle chunk can also trip it; read the diff before relaxing the check.
 
-```powershell
-irm https://t3.codes/install.ps1 | iex
+## Updating to a newer nightly
+
+```sh
+cd packaging/fork
+./sync-upstream.sh
+makepkg -Cf
+sudo pacman -U t3code-nightly-patched-<new version>-x86_64.pkg.tar.zst
+git push --force-with-lease origin main
 ```
 
-Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
+`sync-upstream.sh` fetches upstream tags, rebases `main` onto the newest nightly, updates `pkgver` and the checksum, and commits that change. If the rebase hits a conflict, resolve it, run `git rebase --continue`, then run the script again.
 
-To try it once without installing, run `npx t3@latest` instead.
+It expects a remote named `upstream` pointing at `https://github.com/pingdotgg/t3code`.
 
-### Desktop app
+## Working on the fork
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Each fork change is an ordinary commit on `main`. Keep them few and self-contained so rebases stay cheap, and keep fork-only files under `packaging/fork/` so they never collide with upstream paths.
 
-#### Windows (`winget`)
+To run a change before packaging it, use upstream's dev server with a separate data directory so it doesn't touch your real `~/.t3`:
 
-```bash
-winget install T3Tools.T3Code
+```sh
+mise x node@$(jq -r .engines.node package.json) pnpm@$(jq -r '.packageManager|sub("^pnpm@";"")' package.json) -- \
+  sh -c 'pnpm install && pnpm dev --home-dir ~/.t3-dev'
 ```
 
-#### Windows (`scoop`)
+The package build reads committed `main`, not your working tree, so commit before running `makepkg`.
 
-```bash
-scoop install extras/t3code
-```
+## License
 
-#### macOS (Homebrew)
-
-```bash
-brew install --cask t3-code
-```
-
-#### Debian, Ubuntu (`.deb`)
-
-Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
-
-```bash
-sudo apt install ./T3-Code-*.deb
-```
-
-#### Arch Linux (AUR)
-
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
-
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
-
-#### Nix (nixpkgs)
-
-```bash
-nix profile add github:NixOS/nixpkgs/nixos-unstable#t3code
-```
-
-The package is maintained in [nixpkgs](https://github.com/NixOS/nixpkgs/tree/nixos-unstable/pkgs/by-name/t3/t3code)
-and includes the desktop app (`t3code-desktop`) and the `t3` command.
-See [Nix installation](./docs/user/install.md#nix-nixpkgs) for NixOS configuration and updates.
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
-
-## Documentation
-
-Full docs live in [docs/](./docs). There's no docs site yet.
-
-- [FAQ](./docs/user/faq.md)
-- [Install and first run](./docs/user/install.md)
-- [Permission modes](./docs/user/permission-modes.md)
-- [Keyboard shortcuts](./docs/user/keybindings.md)
-- [Project settings](./docs/user/project-settings.md)
-- [Appearance preferences](./docs/user/appearance.md)
-- [Remote access from a phone or another machine](./docs/user/remote-access.md)
-- [Connect Claude Code, Codex, ChatGPT and other agents over MCP](./docs/user/outside-agents.md)
-- [Keeping app and server in sync](./docs/user/updating.md)
-- [Source control integrations](./docs/user/source-control.md)
-- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
-- [Run T3 Code as a background service](./docs/user/background-service.md)
-
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
-
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
-
-```bash
-irm https://vite.plus/ps1 | iex
-```
-
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
-
-### Install dependencies
-
-```bash
-vp i
-```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
-
-Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+MIT, as upstream. See [LICENSE](./LICENSE). The devenv logo comes from [cachix/devenv](https://github.com/cachix/devenv) (Apache-2.0).
