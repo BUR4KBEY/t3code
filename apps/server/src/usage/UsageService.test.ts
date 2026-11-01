@@ -1266,9 +1266,32 @@ describe("UsageService", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("discovers Pi history in its default home and directory overrides", () =>
+  it.live("discovers Pi and omp history in their default homes and shared overrides once", () =>
     Effect.gen(function* () {
       const { home, settings } = yield* setup;
+      const ompDir = NodePath.join(home, ".omp/agent/sessions");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(ompDir, { recursive: true });
+        await NodeFSP.writeFile(
+          NodePath.join(ompDir, "session.jsonl"),
+          [
+            { type: "session", id: "omp-session" },
+            {
+              type: "message",
+              id: "omp-turn",
+              timestamp: "2026-08-01T10:00:00Z",
+              message: {
+                role: "assistant",
+                provider: "anthropic",
+                model: "model",
+                usage: { input: 11, cost: { total: 0.5 } },
+              },
+            },
+          ]
+            .map((line) => encodeUnknownJsonString(line))
+            .join("\n") + "\n",
+        );
+      });
       for (const [agentDir, sessionDir, relativeDir] of [
         [undefined, undefined, ".pi/agent/sessions"],
         ["~/custom-pi", undefined, "custom-pi/sessions"],
@@ -1306,6 +1329,16 @@ describe("UsageService", () => {
               .resolvedHomePath,
             dir,
           );
+          // omp honors Pi's directory overrides, so an override makes both read the same files.
+          const omp = summary.buckets.filter((bucket) => bucket.provider === "omp");
+          if (agentDir === undefined) {
+            assert.deepStrictEqual(
+              omp.map((bucket) => [bucket.totals.uncachedInputTokens, bucket.costUsd]),
+              [[11, 0.5]],
+            );
+          } else {
+            assert.deepStrictEqual(omp, []);
+          }
         }).pipe(
           Effect.scoped,
           Effect.provide(

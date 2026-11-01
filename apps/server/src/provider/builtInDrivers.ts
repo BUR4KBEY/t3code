@@ -11,6 +11,7 @@ import { GrokDriver, type GrokDriverEnv } from "@t3tools/provider-grok/server";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "@t3tools/provider-opencode/server";
 import { MuseDriver, type MuseDriverEnv } from "@t3tools/provider-muse/server";
 import { PiDriver, type PiDriverEnv } from "@t3tools/provider-pi/server";
+import { ompUsageReader } from "@t3tools/provider-pi/server/usage";
 import type {
   AnyProviderDriver,
   ProviderUsageReaderEnv,
@@ -62,6 +63,8 @@ export const BUILT_IN_USAGE_DRIVERS: ReadonlyArray<
   CodexDriver,
   GrokDriver,
   PiDriver,
+  // omp runs as an ACP registry agent; its usage lives in Pi-format transcripts.
+  { ...AcpRegistryDriver, usage: ompUsageReader },
   OpenCodeDriver,
   MuseDriver,
   AntigravityDriver,

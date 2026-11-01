@@ -50,7 +50,11 @@ const Entry = Schema.Union([
 ]);
 const decodeEntry = Schema.decodeUnknownOption(Entry);
 
-function parseRecord(parsed: unknown, state: typeof PiScanState.Type): readonly UsageRecord[] {
+function parseRecord(
+  provider: "pi" | "omp",
+  parsed: unknown,
+  state: typeof PiScanState.Type,
+): readonly UsageRecord[] {
   const decoded = decodeEntry(parsed);
   if (Option.isNone(decoded)) return [];
   const entry = decoded.value;
@@ -86,7 +90,7 @@ function parseRecord(parsed: unknown, state: typeof PiScanState.Type): readonly 
   if (totalTokens(totals) === 0 && reportedCostUsd === null) return [];
   return [
     {
-      provider: "pi",
+      provider,
       timestampMs,
       model,
       ...(rateModel === undefined ? {} : { rateModel }),
@@ -95,34 +99,41 @@ function parseRecord(parsed: unknown, state: typeof PiScanState.Type): readonly 
       reportedCostUsd,
       speed: "standard",
       // Forks preserve IDs/timestamps; short random IDs need timestamp/model to avoid cross-session collisions.
+      // The "pi" prefix also covers omp, so a session directory both readers resolve counts once.
       dedupeKey: JSON.stringify(["pi", entry.id, entry.timestamp, model]),
     },
   ];
 }
 
-export const piUsageFormat: TranscriptUsageFormat<typeof PiScanState.Type> = {
-  selectFields: {
-    type: true,
-    id: true,
-    timestamp: true,
-    provider: true,
-    model: true,
-    usage: true,
-    message: { role: true, provider: true, model: true, responseModel: true, usage: true },
-  },
-  usageMarkers: ['"usage"', '"session"'],
-  parseLine: (line, state) => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      return [];
-    }
-    return parseRecord(parsed, state);
-  },
-  parseProjected: parseRecord,
-  state: { initial: () => ({ sessionId: "" }), schema: PiScanState },
-};
+function makePiFamilyUsageFormat(
+  provider: "pi" | "omp",
+): TranscriptUsageFormat<typeof PiScanState.Type> {
+  return {
+    selectFields: {
+      type: true,
+      id: true,
+      timestamp: true,
+      provider: true,
+      model: true,
+      usage: true,
+      message: { role: true, provider: true, model: true, responseModel: true, usage: true },
+    },
+    usageMarkers: ['"usage"', '"session"'],
+    parseLine: (line, state) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return [];
+      }
+      return parseRecord(provider, parsed, state);
+    },
+    parseProjected: (projected, state) => parseRecord(provider, projected, state),
+    state: { initial: () => ({ sessionId: "" }), schema: PiScanState },
+  };
+}
+
+export const piUsageFormat = makePiFamilyUsageFormat("pi");
 
 export const piUsageReader: ProviderUsageReader<PiSettings, Path.Path> = {
   kind: "transcripts",
@@ -135,17 +146,29 @@ export const piUsageReader: ProviderUsageReader<PiSettings, Path.Path> = {
   }),
 };
 
-/** Where Pi stores session JSONL files for a provider environment, matching Pi's own lookup. */
+/** omp (oh-my-pi) runs over ACP but writes Pi's session JSONL under ~/.omp/agent. */
+export const ompUsageReader: ProviderUsageReader<unknown, Path.Path> = {
+  kind: "transcripts",
+  provider: "omp",
+  format: makePiFamilyUsageFormat("omp"),
+  directories: Effect.fn("ompUsageReader.directories")(function* ({ environment }) {
+    const path = yield* Path.Path;
+    const home = yield* HostProcess.HomeDirectory;
+    return [
+      { dir: resolvePiSessionsDir(environment, home, path, path.join(home, ".omp", "agent")) },
+    ];
+  }),
+};
+
+/** Where Pi (or omp, via its default agent dir) stores session JSONL files, matching their own lookup. */
 export function resolvePiSessionsDir(
   environment: NodeJS.ProcessEnv,
   home: string,
   path: Path.Path,
+  defaultAgentDir = path.join(home, ".pi", "agent"),
 ): string {
   const sessionDir = environment.PI_CODING_AGENT_SESSION_DIR?.trim();
   if (sessionDir) return path.resolve(expandHomePath(sessionDir, home));
   const agentDir = environment.PI_CODING_AGENT_DIR?.trim();
-  return path.resolve(
-    agentDir ? expandHomePath(agentDir, home) : path.join(home, ".pi", "agent"),
-    "sessions",
-  );
+  return path.resolve(agentDir ? expandHomePath(agentDir, home) : defaultAgentDir, "sessions");
 }

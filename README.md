@@ -22,6 +22,16 @@ A different wrapper works too, as long as it keeps stdout clean: ACP clients end
 
 Existing threads pick up the indicator on their next message.
 
+### omp usage history
+
+Upstream's Usage page has no session reader for ACP Registry agents, so omp threads never appear in its totals even though the composer shows their live cost. The fork adds an `omp` usage provider that reads omp's session files from `~/.omp/agent/sessions`. Each assistant message in those files records its tokens and `cost.total`, so the cost on Usage is omp's own number, not an estimate.
+
+omp writes the same JSONL format as Pi, so the reader is Pi's reader (`packages/provider-pi/src/server/usage.ts`) with a different default directory. omp also honors `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`. If those point omp and Pi at one directory, the sessions count once, under Pi. The reader is attached to the `acpRegistry` driver in `apps/server/src/provider/builtInDrivers.ts`.
+
+Known gap: the Usage page links each usage provider to one driver, and omp shares `acpRegistry` with every other registry agent. Hiding omp on Usage also hides Limits rows of other ACP Registry agents, and those rows take omp's color.
+
+Upstream status (checked 2026-11-01): no issue, PR, or discussion covers omp usage. The closest are discussions [#27535](https://github.com/pingdotgg/t3code/discussions/27535) (Devin history through the ACP Registry) and [#24407](https://github.com/pingdotgg/t3code/discussions/24407) (Usage for ACP Registry agents in general). Upstream treats a new Usage source as a feature that needs an approved Ideas discussion before a PR. It closed [#26728](https://github.com/pingdotgg/t3code/pull/26728) (ACP plan limits in Usage) on those grounds, and it has closed every omp provider PR (#8985, #10893, and others) because omp is not a supported provider. Propose the general ACP Registry approach in an Ideas discussion before sending this upstream.
+
 ## Installing on Arch Linux
 
 `packaging/fork/PKGBUILD` builds a package named `t3code-nightly-patched`. It replaces `t3code-nightly-bin`.
