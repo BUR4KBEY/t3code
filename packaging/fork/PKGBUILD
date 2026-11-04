@@ -86,6 +86,10 @@ prepare() {
     git -C "$_repo_root" fetch --no-tags https://github.com/pingdotgg/t3code.git \
       "refs/tags/v${_upstream_version}:refs/tags/v${_upstream_version}"
   fi
+  # A shallow clone cuts main's history above the tag, failing the check below.
+  if [[ $(git -C "$_repo_root" rev-parse --is-shallow-repository) == true ]]; then
+    git -C "$_repo_root" fetch --unshallow
+  fi
   if ! git -C "$_repo_root" merge-base --is-ancestor "v${_upstream_version}" main; then
     echo "main is not based on v${_upstream_version}. Run sync-upstream.sh." >&2
     return 1
