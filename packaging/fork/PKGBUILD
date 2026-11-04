@@ -129,8 +129,9 @@ build() {
   _toolchain node "$asar" extract "$resources/app.asar" "$official"
 
   # Release CI bakes the public T3 Connect (relay, Clerk, tracing) config into
-  # the bundle. Read the same values back out of the official build.
-  local server_bundle=("$official"/apps/server/dist/binCli-*.mjs)
+  # the bundle. Read the same values back out of the official build. Search
+  # every server chunk: the bundler moves these values between chunks.
+  local server_bundle=("$official"/apps/server/dist/*.mjs)
   local client_assets=("$official"/apps/server/dist/client/assets/*.js)
   export GITHUB_REPOSITORY=pingdotgg/t3code
   export T3CODE_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_CLI_OAUTH_CLIENT_ID T3CODE_CLERK_JWT_TEMPLATE
