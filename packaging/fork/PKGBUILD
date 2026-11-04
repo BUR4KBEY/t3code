@@ -80,6 +80,12 @@ prepare() {
 
   # The fork must sit on the nightly whose AppImage we unpack; otherwise the
   # rebuilt JavaScript and the native payload come from different releases.
+  # origin carries no upstream tags, so checkouts besides the one that ran
+  # sync-upstream.sh lack the tag until it is fetched here.
+  if ! git -C "$_repo_root" rev-parse -q --verify "refs/tags/v${_upstream_version}" >/dev/null; then
+    git -C "$_repo_root" fetch --no-tags https://github.com/pingdotgg/t3code.git \
+      "refs/tags/v${_upstream_version}:refs/tags/v${_upstream_version}"
+  fi
   if ! git -C "$_repo_root" merge-base --is-ancestor "v${_upstream_version}" main; then
     echo "main is not based on v${_upstream_version}. Run sync-upstream.sh." >&2
     return 1
