@@ -32,6 +32,16 @@ Known gap: the Usage page links each usage provider to one driver, and omp share
 
 Upstream status (checked 2026-11-01): no issue, PR, or discussion covers omp usage. The closest are discussions [#27535](https://github.com/pingdotgg/t3code/discussions/27535) (Devin history through the ACP Registry) and [#24407](https://github.com/pingdotgg/t3code/discussions/24407) (Usage for ACP Registry agents in general). Upstream treats a new Usage source as a feature that needs an approved Ideas discussion before a PR. It closed [#26728](https://github.com/pingdotgg/t3code/pull/26728) (ACP plan limits in Usage) on those grounds, and it has closed every omp provider PR (#8985, #10893, and others) because omp is not a supported provider. Propose the general ACP Registry approach in an Ideas discussion before sending this upstream.
 
+### Usage limits for agents
+
+Upstream shows subscription limits only to clients (Usage → Limits, `/usage-limits`, the thread details card). The fork adds a read-only MCP tool, `t3_usage_limits`, so agents running in T3 can check them too, for example before starting a long job or picking where to delegate.
+
+It returns the same pooled per-account report as Usage → Limits: provider accounts and CLIProxyAPI hub accounts, each with `checkedAt` (when its limits were last read), its windows (`label`, `usedPercent`, `resetsAt`), and an `unavailable` reason when there is one. Hub errors come back in `notices`. `driver` narrows the result to one provider type, such as `codex`. `environmentId` reads a linked machine's limits.
+
+By default it returns the saved snapshot. `refresh: true` re-checks every provider and hub first, at most once a minute per environment; a call inside that minute gets the saved data with `refreshed: false`. The result never includes hub URLs, management keys, emails, workspace ids, or reset credit ids. Hub account labels are built from the hub's auth file names, which often contain the login email, exactly as the UI shows them.
+
+The tool lives in `apps/server/src/mcp/toolkits/environment/`, next to `t3_environment_read`, with the same access rules; it is also on Claude's read-only tool allowlist. It reuses the UI's normalizer through `collectDriverUsageLimits` in `packages/shared/src/usageLimits.ts`. Adding it raises `mcpToolListJsonBytes` in `apps/server/src/provider/agentContextBudget.json`; after a rebase that changes tool text, rerun `apps/server/src/provider/AgentContextBudget.test.ts` and copy the measured value.
+
 ## Installing on Arch Linux
 
 `packaging/fork/PKGBUILD` builds a package named `t3code-nightly-patched`. It replaces `t3code-nightly-bin`.

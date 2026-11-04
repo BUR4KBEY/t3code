@@ -150,6 +150,10 @@ current model's limits without leaving the conversation. The result opens above 
 closes when you dismiss it or send your next message. It uses the same snapshot as **Usage → Limits**, so it does not run the agent or refresh
 anything. The command is offered only for providers that appear under **Usage → Limits**.
 
+Agents running in T3 Code can read the same limits with the `t3_usage_limits` tool. Each account
+shows when it was last checked. An agent can ask for a fresh check at most once a minute per
+environment. The result never includes hub management keys, emails, or reset credit ids.
+
 To keep them in view on web and desktop, turn on **Usage limits** in **Settings → Appearance → Thread details**, or right-click the thread details card.
 The bottom of the thread details card then shows how much is left in each limit window of the
 current provider account. Some windows, such as a weekly Opus limit, count only one model. Hover a

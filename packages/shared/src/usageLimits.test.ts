@@ -10,6 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   type LimitAccount,
+  collectDriverUsageLimits,
   collectProviderUsageLimits,
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -1121,6 +1122,13 @@ describe("/usage-limits", () => {
       accountId: "oss",
       creditId: "oss-credit",
     });
+  });
+
+  it("reports hub accounts for a driver with no provider instance", () => {
+    const report = collectDriverUsageLimits(ProviderDriverKind.make("claude"), [], sources, now);
+    expect(report?.accounts).toEqual([
+      expect.objectContaining({ id: "hub:other-provider", sourceLabel: "CLI Proxy" }),
+    ]);
   });
 
   it("gives a hub credit to no native row when its email is signed in to two workspaces", () => {
