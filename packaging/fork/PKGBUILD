@@ -170,10 +170,11 @@ build() {
   rm -rf "$staged/apps/server/dist" "$staged/apps/desktop/dist-electron"
   cp -a apps/server/dist "$staged/apps/server/dist"
   cp -a apps/desktop/dist-electron "$staged/apps/desktop/dist-electron"
-  # Release archives ship without source maps or the Vite manifest, and the
-  # server build copies development favicons over the release ones.
+  # Release archives ship without source maps, the Vite manifest, or the web
+  # app's .well-known link files, and the server build copies development
+  # favicons over the release ones.
   find "$staged/apps" -name '*.map' -delete
-  rm -rf "$staged/apps/server/dist/client/.vite"
+  rm -rf "$staged/apps/server/dist/client/.vite" "$staged/apps/server/dist/client/.well-known"
   find "$official/apps/server/dist/client" -maxdepth 1 -type f \( -name '*.ico' -o -name '*.png' \) \
     -exec cp -f -t "$staged/apps/server/dist/client" {} +
 
