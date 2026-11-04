@@ -213,6 +213,7 @@ it("shows a lineage thread's full title in its tooltip", async () => {
       threadId={threadId}
       showLineage
       showSideChats={false}
+      showDevenv={false}
     />,
   );
 
@@ -243,6 +244,7 @@ it("shows a side chat's full title in its tooltip", async () => {
       threadId={threadId}
       showLineage={false}
       showSideChats
+      showDevenv={false}
     />,
   );
 
@@ -295,6 +297,7 @@ it("shows a remote subagent's full title in its tooltip even when its environmen
       threadId={threadId}
       showLineage
       showSideChats={false}
+      showDevenv={false}
     />,
     { router: "/environment/fork" },
   );
@@ -332,6 +335,7 @@ it("shows a delegated-from thread's full title in its tooltip even when its envi
       threadId={threadId}
       showLineage
       showSideChats={false}
+      showDevenv={false}
     />,
     { router: "/environment/fork" },
   );
