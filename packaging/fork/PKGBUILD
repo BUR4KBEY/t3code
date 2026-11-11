@@ -9,7 +9,7 @@
 # sync-upstream.sh keeps the two in step.
 
 pkgname=t3code-nightly-patched
-pkgver=0.1.8_nightly.20261104.4165
+pkgver=0.1.10_nightly.20261111.4529
 pkgrel=1
 pkgdesc='T3 Code nightly with the BUR4KBEY fork changes'
 arch=('x86_64')
@@ -55,7 +55,7 @@ _upstream_version="${pkgver/_nightly./-nightly.}"
 _appimage="T3-Code-${_upstream_version}-x86_64.AppImage"
 _repo_root="${startdir%/packaging/fork}"
 source=("$_appimage::https://github.com/pingdotgg/t3code/releases/download/v${_upstream_version}/$_appimage")
-sha256sums=('666aefd6069ec8800bcab783cc3ea98061216951ef32a238013e9a24457086a6')
+sha256sums=('08324ab3c1ff06a3cb2ade8873424269b219b4deca234ed73f1c789965991cd0')
 
 # Runs a command in the checkout's devenv shell (pinned Node and pnpm, pnpm
 # store under the checkout's .devenv/state) without leaving the current dir.
