@@ -9,7 +9,6 @@ import type {
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 import type { BackgroundWorkReport } from "@t3tools/provider-core/server/notification";
-import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -112,6 +111,7 @@ const BridgeJob = Schema.Struct({
   type: Schema.String,
   status: Schema.String,
   label: Schema.String,
+  endTime: Schema.NullOr(Schema.Number),
 });
 const BridgeMessage = Schema.Union([
   Schema.Struct({ t: Schema.Literal("hello"), version: Schema.Number }),
@@ -144,6 +144,8 @@ const BridgeMessage = Schema.Union([
     agent: BridgeAgent,
     running: Schema.Array(BridgeJob),
     recent: Schema.Array(BridgeJob),
+    /** When omp's main agent last went idle; null while it runs a turn. */
+    idleSince: Schema.NullOr(Schema.Number),
   }),
 ]);
 type BridgeMessage = typeof BridgeMessage.Type;
@@ -232,10 +234,8 @@ export function makeOmpBridgeHost(testHooks?: {
     const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-omp-" });
     const extensionPath = path.join(directory, "t3-bridge.mjs");
     yield* fileSystem.writeFileString(extensionPath, OMP_BRIDGE_EXTENSION_SOURCE);
-    const socketPath =
-      (yield* HostProcess.Platform) === "win32"
-        ? `\\\\.\\pipe\\${path.basename(directory)}`
-        : path.join(directory, "bridge.sock");
+    // Unix socket only: the fork targets Linux.
+    const socketPath = path.join(directory, "bridge.sock");
     const lines = yield* Queue.unbounded<string>();
     const bridge: OmpBridge = {
       extensionPath,
@@ -289,20 +289,17 @@ export function makeOmpBridgeHost(testHooks?: {
   ) {
     const state = jobs.get(sessionId) ?? { running: new Map(), unseen: new Map() };
     jobs.set(sessionId, state);
-    // omp never wakes itself over ACP: a job that settles with no prompt open is only queued
-    // for the next prompt, so T3 sends one. A prompt drains jobs that settle while it runs.
-    const promptInFlight = yield* context.isPromptInFlight(sessionId);
-    if (promptInFlight) state.unseen.clear();
+    // omp never wakes itself over ACP. A job that ends during omp's turn is drained into it;
+    // one that ends after the turn waits for the next prompt, so T3 sends one.
+    const idleSince = message.idleSince;
+    if (idleSince === null) state.unseen.clear();
     const running = new Map(message.running.map((job) => [job.id, job] as const));
     for (const [id, job] of state.running) {
-      if (running.has(id) || promptInFlight) continue;
-      state.unseen.set(
-        id,
-        jobReport(
-          job,
-          message.recent.find((recent) => recent.id === id),
-        ),
-      );
+      if (running.has(id) || idleSince === null) continue;
+      const settled = message.recent.find((recent) => recent.id === id);
+      // shortcut: a result omp drains right after its turn ends still gets one extra wake turn; upgrade if omp reports per-job delivery.
+      if (settled?.endTime != null && settled.endTime < idleSince) continue;
+      state.unseen.set(id, jobReport(job, settled));
     }
     state.running = running;
     const tasks: Array<OrchestrationV2PendingBackgroundTask> = message.running.map((job) => {

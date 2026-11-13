@@ -47,7 +47,7 @@ The tool lives in `apps/server/src/mcp/toolkits/environment/`, next to `t3_envir
 Upstream runs omp through the generic ACP Registry adapter, which shows a `task` call as a plain tool row and never shows background jobs. The fork gives omp the same subagent and background-work views Claude gets:
 
 - every child of a `task` call gets its own subagent card with live status, prompt, name, model and result, and a read-only child thread that streams its messages and tool calls
-- **Stop** on a running omp subagent cancels it
+- **Stop** on a running omp subagent cancels it, and **Stop** on the parent turn also cancels its still-running subagents (ACP cancel alone leaves them running in omp)
 - async `bash` and `eval` jobs appear under background work and keep the thread Working until they finish
 - when a job finishes after omp's turn ended, T3 sends omp a short follow-up message so it reads the result
 
@@ -59,9 +59,11 @@ Behavior worth knowing:
 
 - A turn whose subagents are still running stays Working after omp's own reply, because only the extension can report them finishing.
 - The follow-up after background work is a separate run in the thread ("N background tasks finished"), not part of the original run.
+- The follow-up is decided from omp's own timing: a job that ends after omp's turn ended gets one. Rarely omp has already picked that result up right after its turn, and the follow-up is one short extra turn with nothing new.
+- **Stop** on the parent cannot end async `bash` or `eval` jobs: omp's extension API has no way to cancel them.
 - `bash` services started with a name (`name`/`ready`) are not jobs, so they never hold the thread.
 - Only direct children of the main session get cards. Deeper subagents show up as tool rows in their parent's thread.
-- Tested on Linux only.
+- Linux only: the extension talks to T3 over a Unix socket.
 
 Shared changes outside the omp code: the ACP adapter's `extractSubagentUpdate` hook may return several subagents for one tool call, and subagents carry an optional `stoppable` flag that the web, mobile and server Stop checks accept next to Claude. The `t3_background_wait` MCP tool works for omp too, which raised `mcpToolListJsonBytes` in `apps/server/src/provider/agentContextBudget.json`.
 

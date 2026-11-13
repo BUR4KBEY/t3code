@@ -72,13 +72,22 @@ function clip(value) {
 }
 
 function job(item) {
-  return { id: item.id, type: item.type, status: item.status, label: item.label ?? "" };
+  return {
+    id: item.id,
+    type: item.type,
+    status: item.status,
+    label: item.label ?? "",
+    endTime: item.endTime ?? null,
+  };
 }
 
 let nextMessage = 0;
 
 export default function t3Bridge(pi) {
   connect();
+  // The main agent's turn state: a job that ends while it is idle waits for the next prompt.
+  let mainRunning = false;
+  let idleSince = Date.now();
 
   pi.on("session_start", (_event, ctx) => {
     if (ctx.agent.kind === "sub") {
@@ -95,7 +104,13 @@ export default function t3Bridge(pi) {
       const key = JSON.stringify(running);
       if (key === last) return;
       last = key;
-      send({ t: "jobs", agent: who(ctx), running, recent: snapshot.recent.map(job) });
+      send({
+        t: "jobs",
+        agent: who(ctx),
+        running,
+        recent: snapshot.recent.map(job),
+        idleSince: mainRunning ? null : idleSince,
+      });
     }, 1000);
   });
 
@@ -104,6 +119,7 @@ export default function t3Bridge(pi) {
   });
 
   pi.on("agent_start", (_event, ctx) => {
+    if (ctx.agent.kind === "main") mainRunning = true;
     if (ctx.agent.kind === "sub") children.set(ctx.agent.id, ctx);
   });
 
@@ -142,6 +158,11 @@ export default function t3Bridge(pi) {
   });
 
   pi.on("agent_end", (event, ctx) => {
+    if (ctx.agent.kind === "main") {
+      mainRunning = false;
+      idleSince = Date.now();
+      return;
+    }
     // A settle that waits on the child's own background jobs is a pause, not its end.
     if (ctx.agent.kind !== "sub" || event.willContinue === true) return;
     const last = [...event.messages].reverse().find((message) => message.role === "assistant");

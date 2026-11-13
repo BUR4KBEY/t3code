@@ -129,11 +129,14 @@ remain agent-specific.
 
 Add omp as a local command: executable `omp` (or a wrapper whose name starts with `omp-`) with the
 argument `acp`. T3 Code loads a small extension into omp, so omp's `task` subagents get their own
-cards and read-only child threads with live transcripts, and **Stop** cancels a running subagent.
+cards and read-only child threads with live transcripts. **Stop** cancels a running subagent, and
+stopping the parent turn also cancels the subagents it still has running.
 
 omp's background jobs (`bash`, `eval`, or a `task` it did not wait for) appear under background
 work, and the thread stays **Working** until they finish. omp does not resume on its own when a job
-ends after its turn, so T3 Code sends it a short follow-up message to read the result. Services
+ends after its turn, so T3 Code sends it a short follow-up message to read the result. Rarely that
+follow-up arrives after omp already read the result and produces a short turn with nothing new.
+Stopping the parent does not end `bash` or `eval` jobs. Services
 started with a name keep running without holding the thread. If the extension cannot load, cards
 still appear from what omp reports over ACP, without transcripts or **Stop**.
 

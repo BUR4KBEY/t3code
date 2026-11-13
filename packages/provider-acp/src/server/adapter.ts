@@ -242,8 +242,6 @@ export interface AcpAdapterV2ExtensionContext {
     readonly sessionId: string;
     readonly tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>;
   }) => Effect.Effect<void>;
-  /** True while this root session's `session/prompt` has not returned. */
-  readonly isPromptInFlight: (sessionId: string) => Effect.Effect<boolean>;
   /** Prompts the agent once with app-owned wake text, for agents that never wake on their own. */
   readonly requestWakeTurn: (input: {
     readonly sessionId: string;
@@ -7005,16 +7003,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     });
                   }),
                 ).pipe(Effect.asVoid),
-              isPromptInFlight: (sessionId) =>
-                Ref.get(activeTurn).pipe(
-                  Effect.map(
-                    (context) =>
-                      context !== null &&
-                      !context.finalized &&
-                      !context.promptSettled &&
-                      context.nativeThreadId === sessionId,
-                  ),
-                ),
               requestWakeTurn: ({ sessionId, detail, reports }) =>
                 runRuntimeCallbackAtGeneration(
                   handlerGeneration,
@@ -9317,6 +9305,23 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     });
                     const runTransition = Effect.gen(function* () {
                       context.interrupted = true;
+                      // ACP cancel leaves an agent's background children running; a user Stop ends them too.
+                      if (
+                        turnInput.requestRuntimeRestart === true &&
+                        flavorStopSubagent !== undefined
+                      ) {
+                        for (const subagent of context.subagents.values()) {
+                          if (
+                            subagent.childSessionId === null ||
+                            !acpSubagentStatusBlocksTurnSettlement(subagent.task.status)
+                          )
+                            continue;
+                          yield* flavorStopSubagent({
+                            runtime,
+                            childSessionId: subagent.childSessionId,
+                          });
+                        }
+                      }
                       if (hardRestart || turnInput.requestRuntimeRestart === true) {
                         yield* quarantineStoppedRun();
                       }

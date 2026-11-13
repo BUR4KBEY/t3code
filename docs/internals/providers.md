@@ -149,8 +149,11 @@ inside the server ([source](../../packages/provider-acp-registry/src/server/ompB
 and writes it next to a per-process socket at launch. The
 [flavor](../../packages/provider-acp-registry/src/server/ompAcp.ts) holds the run while bridged
 subagents run, lists running jobs as `pendingBackgroundTasks`, and sends a wake prompt when a job
-settles with no prompt open. Without a connected bridge it falls back to ACP data alone, so it
-must never hold a run or offer Stop that only the bridge could finish.
+ends after omp's main turn ended, judged by omp's own clock (`idleSince` and job `endTime`), since
+T3's prompt timing cannot see omp's post-turn result drain. A user Stop also cancels live children
+over the bridge, because ACP `session/cancel` leaves omp's async children running. Without a
+connected bridge it falls back to ACP data alone, so it must never hold a run or offer Stop that
+only the bridge could finish.
 
 ## Attachments and stored history
 

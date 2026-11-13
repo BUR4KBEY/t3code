@@ -3086,6 +3086,13 @@ describe("AcpAdapterV2", () => {
     const decodeLine = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
     const main = { id: "acp:mock-session-1", parentId: null, kind: "main" };
     const alpha = { id: "Alpha", parentId: "acp:mock-session-1", kind: "sub" };
+    const job = (id: string, type: string, label: string) => ({
+      id,
+      type,
+      label,
+      status: "running",
+      endTime: null as number | null,
+    });
     const taskInput = {
       context: "Brief.",
       tasks: [
@@ -3210,10 +3217,12 @@ describe("AcpAdapterV2", () => {
                           t: "jobs",
                           agent: main,
                           running: [
-                            { id: "bg_1", type: "bash", status: "running", label: "make" },
-                            { id: "Alpha", type: "task", status: "running", label: "Alpha" },
+                            { ...job("bg_1", "bash", "make"), status: "running" },
+                            { ...job("Alpha", "task", "Alpha"), status: "running" },
                           ],
                           recent: [],
+                          // omp's main turn is still running.
+                          idleSince: null,
                         });
                         yield* awaitHandled("jobs");
                       }
@@ -3274,6 +3283,7 @@ describe("AcpAdapterV2", () => {
         runtime,
         providerThread,
         threadId,
+        instanceId,
         send,
         fromT3,
         promptHeld,
@@ -3281,6 +3291,7 @@ describe("AcpAdapterV2", () => {
         continuations,
         seen,
         takeUntil,
+        awaitHandled,
       };
     });
 
@@ -3315,11 +3326,13 @@ describe("AcpAdapterV2", () => {
           t: "jobs",
           agent: main,
           running: [],
+          // Both ended after omp's turn did, so their results wait for a prompt.
           recent: [
-            { id: "bg_1", type: "bash", status: "completed", label: "make" },
+            { ...job("bg_1", "bash", "make"), status: "completed", endTime: 2_000 },
             // omp records an aborted task job as failed; the card's cancel must win.
-            { id: "Alpha", type: "task", status: "failed", label: "Alpha" },
+            { ...job("Alpha", "task", "Alpha"), status: "failed", endTime: 2_000 },
           ],
+          idleSince: 1_000,
         });
         const wake = yield* Queue.take(omp.continuations);
         assert.equal(wake.delivery, "message_text");
@@ -3392,6 +3405,40 @@ describe("AcpAdapterV2", () => {
             { taskId: "Alpha", kind: "subagent", description: "Alpha", awaited: true },
           ],
         );
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("cancels omp's live children on a parent Stop and skips a wake omp already saw", () =>
+      Effect.gen(function* () {
+        const omp = yield* makeOmpHarness(true);
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        yield* Deferred.await(omp.promptHeld);
+        // ACP cancel alone leaves omp's async children running.
+        yield* omp.runtime.interruptTurn({
+          providerThread: omp.providerThread,
+          providerTurnId: idAllocator.derive.providerTurn({
+            driver: ACP_TEST_DRIVER,
+            nativeTurnId: acpScopedNativeId(omp.instanceId, "mock-session-1:turn:1"),
+          }),
+          requestRuntimeRestart: true,
+        });
+        assert.deepEqual(decodeLine((yield* Queue.take(omp.fromT3)).trim()), {
+          t: "cancel",
+          agentId: "Alpha",
+        });
+        const terminal = yield* omp.takeUntil((event) => event.type === "turn.terminal");
+        assert.equal(terminal.type === "turn.terminal" && terminal.status, "interrupted");
+
+        // The job ended before omp's turn did, so that turn already drained its result.
+        yield* omp.send({
+          t: "jobs",
+          agent: main,
+          running: [],
+          recent: [{ ...job("bg_1", "bash", "make"), status: "completed", endTime: 500 }],
+          idleSince: 1_000,
+        });
+        yield* omp.awaitHandled("jobs");
+        assert.equal(yield* Queue.size(omp.continuations), 0);
       }).pipe(Effect.provide(layerTest), Effect.scoped),
     );
 
