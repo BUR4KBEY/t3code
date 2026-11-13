@@ -15,6 +15,8 @@ const VERSION = ${OMP_BRIDGE_PROTOCOL_VERSION};
 const OUTPUT_LIMIT = 16000;
 const socketPath = process.env.${OMP_BRIDGE_SOCKET_ENV};
 const children = new Map();
+// omp's package exports; set by the factory.
+let omp;
 let socket;
 let pending = "";
 
@@ -43,13 +45,26 @@ function connect() {
       } catch {
         continue;
       }
-      if (message && message.t === "cancel") {
-        const ctx = children.get(message.agentId);
-        if (ctx !== undefined) Promise.resolve(ctx.abort()).catch(() => {});
-      }
+      if (message && message.t === "cancel") cancelChild(message.agentId);
     }
   });
   send({ t: "hello", version: VERSION });
+}
+
+// Aborting a subagent leaves its background jobs running, including a long foreground
+// bash that omp moved to the background, so cancel them through its live session.
+function cancelChild(agentId) {
+  const ctx = children.get(agentId);
+  if (ctx === undefined) return;
+  Promise.resolve(ctx.abort())
+    .catch(() => {})
+    .then(() => {
+      const session = omp?.AgentRegistry?.global().get(agentId)?.session;
+      const snapshot = ctx.getAsyncJobSnapshot();
+      if (!session || !snapshot) return;
+      for (const job of snapshot.running) session.cancelAsyncJob(job.id);
+    })
+    .catch(() => {});
 }
 
 function who(ctx) {
@@ -84,6 +99,7 @@ function job(item) {
 let nextMessage = 0;
 
 export default function t3Bridge(pi) {
+  omp = pi.pi;
   connect();
   // The main agent's turn state: a job that ends while it is idle waits for the next prompt.
   let mainRunning = false;

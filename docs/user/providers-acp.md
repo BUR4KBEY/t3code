@@ -136,7 +136,8 @@ omp's background jobs (`bash`, `eval`, or a `task` it did not wait for) appear u
 work, and the thread stays **Working** until they finish. omp does not resume on its own when a job
 ends after its turn, so T3 Code sends it a short follow-up message to read the result. Rarely that
 follow-up arrives after omp already read the result and produces a short turn with nothing new.
-Stopping the parent does not end `bash` or `eval` jobs. Services
+Stopping a subagent also ends the background commands it started. Stopping the parent does not end
+the main agent's own `bash` or `eval` jobs. Services
 started with a name keep running without holding the thread. If the extension cannot load, cards
 still appear from what omp reports over ACP, without transcripts or **Stop**.
 

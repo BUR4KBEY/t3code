@@ -60,7 +60,7 @@ Behavior worth knowing:
 - A turn whose subagents are still running stays Working after omp's own reply, because only the extension can report them finishing.
 - The follow-up after background work is a separate run in the thread ("N background tasks finished"), not part of the original run.
 - The follow-up is decided from omp's own timing: a job that ends after omp's turn ended gets one. Rarely omp has already picked that result up right after its turn, and the follow-up is one short extra turn with nothing new.
-- **Stop** on the parent cannot end async `bash` or `eval` jobs: omp's extension API has no way to cancel them.
+- Stopping a subagent (directly or through the parent) also cancels the background jobs that subagent started, including a long `bash` call omp moved to the background after 60s. The extension does this through omp's `AgentRegistry`, which omp exports to extensions. **Stop** on the parent does not end the main agent's own async `bash` or `eval` jobs: their results still reach omp on its next prompt.
 - `bash` services started with a name (`name`/`ready`) are not jobs, so they never hold the thread.
 - Only direct children of the main session get cards. Deeper subagents show up as tool rows in their parent's thread.
 - Linux only: the extension talks to T3 over a Unix socket.
