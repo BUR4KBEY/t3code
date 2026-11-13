@@ -929,6 +929,8 @@ export const OrchestrationV2Subagent = Schema.Struct({
   ]),
   progress: Schema.optional(Schema.String),
   workflow: Schema.optional(OrchestrationV2SubagentWorkflow),
+  /** A provider_native subagent the provider can stop now; Claude's are stoppable without it. */
+  stoppable: Schema.optional(Schema.Boolean),
   result: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),

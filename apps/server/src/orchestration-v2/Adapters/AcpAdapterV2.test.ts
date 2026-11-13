@@ -1,6 +1,7 @@
 import {
   extractCopilotSubagentUpdate,
   makeCopilotSubagentRouting,
+  makeOmpBridgeHost,
   normalizeDevinSessionUpdate,
   normalizeDevinToolCall,
   extractDevinSubagentUpdate,
@@ -11,6 +12,7 @@ import { AcpRegistryCatalog } from "@t3tools/provider-acp-registry/server/AcpReg
 import { decodeAcpReplayTranscript, makeAcpReplayRuntime } from "./AcpAdapterV2.testkit.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -3078,6 +3080,344 @@ describe("AcpAdapterV2", () => {
       );
     }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
+
+  describe("omp", () => {
+    const encodeLine = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+    const decodeLine = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+    const main = { id: "acp:mock-session-1", parentId: null, kind: "main" };
+    const alpha = { id: "Alpha", parentId: "acp:mock-session-1", kind: "sub" };
+    const taskInput = {
+      context: "Brief.",
+      tasks: [
+        { name: "Alpha", agent: "task", task: "Read a.txt." },
+        { name: "Beta", agent: "task", task: "Read b.txt." },
+      ],
+    };
+    const taskProgress = {
+      details: {
+        async: { state: "running", jobId: "Alpha", type: "task" },
+        progress: [
+          { index: 0, id: "Alpha", status: "running" },
+          { index: 1, id: "Beta", status: "completed" },
+        ],
+        results: [{ index: 1, id: "Beta", exitCode: 0, output: "BETA" }],
+      },
+    };
+
+    const makeOmpHarness = Effect.fnUntraced(function* (bridged: boolean) {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const handled = yield* Queue.unbounded<string>();
+      const fromT3 = yield* Queue.unbounded<string>();
+      const awaitHandled = Effect.fnUntraced(function* (type: string) {
+        while ((yield* Queue.take(handled)) !== type) {}
+      });
+      const host = makeOmpBridgeHost({
+        onHandled: (type) => Queue.offer(handled, type).pipe(Effect.asVoid),
+      });
+      let client: NodeNet.Socket | undefined;
+      const send = (message: unknown) =>
+        Effect.sync(() => {
+          client?.write(`${encodeLine(message)}\n`);
+        });
+      let handler: Parameters<
+        AcpSessionRuntime.AcpSessionRuntime["Service"]["handleSessionUpdate"]
+      >[0] = () => Effect.void;
+      const update = (next: EffectAcpSchema.SessionUpdate) =>
+        handler({ sessionId: "mock-session-1", update: next });
+      const promptHeld = yield* Deferred.make<void>();
+      const finalizeScheduled = yield* Deferred.make<Duration.Input>();
+      const continuations =
+        yield* Queue.unbounded<ProviderContinuationRequests.ProviderContinuationRequest>();
+      const instanceId = ProviderInstanceId.make("omp-test");
+      const adapter = yield* makeAcpAdapterV2({
+        instanceId,
+        selfInvocation: yield* resolveSelfInvocation(),
+        testHooks: {
+          afterPromptSettledWithBackgroundWork: () => Deferred.succeed(promptHeld, undefined),
+          onDeferredFinalizeScheduled: (debounce) => Deferred.succeed(finalizeScheduled, debounce),
+        },
+        continuationRequests: { offer: (request) => Queue.offer(continuations, request) },
+        flavor: {
+          driver: ACP_TEST_DRIVER,
+          capabilities: AcpProviderCapabilitiesV2,
+          registerExtensions: host.registerExtensions,
+          extractSubagentUpdate: host.extractSubagentUpdate,
+          stopSubagent: host.stopSubagent,
+          reportsBackgroundTasks: true,
+          deferFinalizeForBackgroundWork: host.connected,
+          subagentsIdleOnTurnCompletion: (runtime) => !host.connected(runtime),
+          makeRuntime: (runtimeInput) =>
+            Effect.gen(function* () {
+              const launch = bridged
+                ? yield* host.launch(fileSystem, path)({ command: "omp", args: ["acp"] })
+                : undefined;
+              if (launch !== undefined) {
+                const extensionPath = launch.spawn.args.at(-1)!;
+                assert.deepEqual(launch.spawn.args.slice(0, 2), ["acp", "--extension"]);
+                const extension = yield* fileSystem
+                  .readFileString(extensionPath)
+                  .pipe(Effect.orDie);
+                assert.include(extension, "t3Bridge");
+                // Stand in for the extension omp would load from that file.
+                client = NodeNet.createConnection(launch.spawn.env!.T3_OMP_BRIDGE_SOCKET!);
+                client.setEncoding("utf8");
+                client.on("data", (chunk: string) => Queue.offerUnsafe(fromT3, chunk));
+                yield* send({ t: "hello", version: 1 });
+              }
+              const runtime = yield* makeMockRuntime({
+                childProcessSpawner,
+                mockAgentPath,
+                wrapRuntime: (runtime) => ({
+                  ...runtime,
+                  handleSessionUpdate: (next) =>
+                    Effect.sync(() => {
+                      handler = next;
+                    }).pipe(Effect.andThen(runtime.handleSessionUpdate(next))),
+                  prompt: () =>
+                    Effect.gen(function* () {
+                      if (bridged) yield* awaitHandled("hello");
+                      yield* update({
+                        sessionUpdate: "tool_call",
+                        toolCallId: "task-1",
+                        title: "task",
+                        kind: "other",
+                        status: "pending",
+                        rawInput: taskInput,
+                        name: "task",
+                      });
+                      yield* update({
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: "task-1",
+                        status: "in_progress",
+                        rawOutput: taskProgress,
+                      });
+                      if (bridged) {
+                        const tool = { t: "tool", agent: alpha, id: "read-1", name: "read" };
+                        yield* send({
+                          ...tool,
+                          phase: "start",
+                          title: "Read a.txt",
+                          args: { path: "a.txt" },
+                        });
+                        yield* send({ ...tool, phase: "end", output: "hi", isError: false });
+                        yield* send({ t: "message", agent: alpha, id: "m1", text: "a says hi" });
+                        yield* send({
+                          t: "jobs",
+                          agent: main,
+                          running: [
+                            { id: "bg_1", type: "bash", status: "running", label: "make" },
+                            { id: "Alpha", type: "task", status: "running", label: "Alpha" },
+                          ],
+                          recent: [],
+                        });
+                        yield* awaitHandled("jobs");
+                      }
+                      return { stopReason: "end_turn" as const };
+                    }),
+                }),
+              })(runtimeInput);
+              launch?.attach(runtime);
+              return runtime;
+            }),
+        },
+      });
+      const threadId = ThreadId.make("omp-parent");
+      const modelSelection = { instanceId, model: "default" };
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: process.cwd(),
+      });
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("omp-session"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
+      yield* runtime.events.pipe(
+        Stream.runForEach((event) => Queue.offer(events, event)),
+        Effect.forkScoped,
+      );
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* runtime
+        .startTurn(
+          makeTurnInput({
+            threadId,
+            providerThread,
+            instanceId,
+            runtimePolicy,
+            now: yield* DateTime.now,
+          }),
+        )
+        .pipe(Effect.forkScoped);
+      const seen: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
+      const takeUntil = Effect.fnUntraced(function* (
+        done: (event: ProviderAdapter.ProviderAdapterV2Event) => boolean,
+      ) {
+        while (true) {
+          const event = yield* Queue.take(events);
+          seen.push(event);
+          if (done(event)) return event;
+        }
+      });
+      return {
+        runtime,
+        providerThread,
+        threadId,
+        send,
+        fromT3,
+        promptHeld,
+        finalizeScheduled,
+        continuations,
+        seen,
+        takeUntil,
+      };
+    });
+
+    const subagentsByNativeId = (events: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event>) =>
+      new Map(
+        events.flatMap((event) =>
+          event.type === "subagent.updated"
+            ? [[event.subagent.nativeTaskRef?.nativeId, event.subagent] as const]
+            : [],
+        ),
+      );
+
+    it.effect("streams children over the bridge, holds the run, stops a child, and wakes omp", () =>
+      Effect.gen(function* () {
+        const omp = yield* makeOmpHarness(true);
+        // The prompt returned while Alpha still runs; only the bridge can finish it now.
+        yield* Deferred.await(omp.promptHeld);
+        const stop = omp.runtime.stopSubagent;
+        assert.isDefined(stop);
+        yield* stop!({ providerThread: omp.providerThread, nativeTaskId: "task-1:0" });
+        assert.deepEqual(decodeLine((yield* Queue.take(omp.fromT3)).trim()), {
+          t: "cancel",
+          agentId: "Alpha",
+        });
+        yield* omp.send({ t: "end", agent: alpha, status: "cancelled", result: null });
+        yield* TestClock.adjust(yield* Deferred.await(omp.finalizeScheduled));
+        const terminal = yield* omp.takeUntil((event) => event.type === "turn.terminal");
+        assert.equal(terminal.type === "turn.terminal" && terminal.status, "completed");
+
+        // The job ends with no prompt open, so T3 prompts omp to read its result.
+        yield* omp.send({
+          t: "jobs",
+          agent: main,
+          running: [],
+          recent: [
+            { id: "bg_1", type: "bash", status: "completed", label: "make" },
+            // omp records an aborted task job as failed; the card's cancel must win.
+            { id: "Alpha", type: "task", status: "failed", label: "Alpha" },
+          ],
+        });
+        const wake = yield* Queue.take(omp.continuations);
+        assert.equal(wake.delivery, "message_text");
+        assert.include(wake.detail ?? "", "make");
+        // Alpha ends both as a card and as a job; the wake names it once.
+        assert.equal(
+          wake.notification?.summary,
+          'Subagent "Alpha" and command "make" were stopped',
+        );
+        yield* omp.takeUntil(
+          (event) =>
+            event.type === "provider_thread.updated" &&
+            event.providerThread.id === omp.providerThread.id &&
+            event.providerThread.pendingBackgroundTasks?.length === 0,
+        );
+
+        const tasks = subagentsByNativeId(omp.seen);
+        assert.deepEqual(
+          [...tasks].map(([id, task]) => [id, task.status, task.result]),
+          [
+            // A child that ends without a result keeps the text it streamed.
+            ["task-1:0", "cancelled", "a says hi"],
+            ["task-1:1", "completed", "BETA"],
+          ],
+        );
+        assert.isTrue(
+          omp.seen.some(
+            (event) =>
+              event.type === "subagent.updated" &&
+              event.subagent.nativeTaskRef?.nativeId === "task-1:0" &&
+              event.subagent.stoppable === true,
+          ),
+        );
+        const alphaThread = tasks.get("task-1:0")?.childThreadId;
+        const childItems = omp.seen.flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.threadId === alphaThread
+            ? [event.turnItem]
+            : [],
+        );
+        const toolRows = childItems.filter((item) => item.type === "dynamic_tool");
+        assert.equal(toolRows.at(-1)?.status, "completed");
+        assert.notEqual(toolRows[0]?.title, "Tool");
+        assert.equal(
+          toolRows.at(-1)?.title,
+          toolRows[0]?.title,
+          "the finished row keeps its title",
+        );
+        assert.isTrue(
+          childItems.some((item) => item.type === "assistant_message" && item.text === "a says hi"),
+        );
+        assert.isFalse(
+          omp.seen.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.threadId === omp.threadId &&
+              event.turnItem.type === "dynamic_tool",
+          ),
+          "the task tool row is replaced by its cards",
+        );
+        assert.deepEqual(
+          omp.seen.flatMap((event) =>
+            event.type === "provider_thread.updated" &&
+            event.providerThread.id === omp.providerThread.id &&
+            (event.providerThread.pendingBackgroundTasks?.length ?? 0) > 0
+              ? [event.providerThread.pendingBackgroundTasks]
+              : [],
+          )[0],
+          [
+            { taskId: "bg_1", kind: "command", description: "make", awaited: true },
+            { taskId: "Alpha", kind: "subagent", description: "Alpha", awaited: true },
+          ],
+        );
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("falls back to ACP data when the bridge never connects", () =>
+      Effect.gen(function* () {
+        const omp = yield* makeOmpHarness(false);
+        const terminal = yield* omp.takeUntil((event) => event.type === "turn.terminal");
+        assert.equal(terminal.type === "turn.terminal" && terminal.status, "completed");
+        assert.deepEqual(
+          [...subagentsByNativeId(omp.seen)].map(([id, task]) => [id, task.status, task.stoppable]),
+          [
+            // Nothing can report Alpha again, so it settles instead of spinning.
+            ["task-1:0", "idle", false],
+            ["task-1:1", "completed", false],
+          ],
+        );
+        const stopped = yield* Effect.exit(
+          omp.runtime.stopSubagent!({
+            providerThread: omp.providerThread,
+            nativeTaskId: "task-1:0",
+          }),
+        );
+        assert.isTrue(Exit.isFailure(stopped), "Stop needs the bridge");
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+  });
 
   it.effect("keeps protocol diagnostics off unless a protocol logger is supplied", () =>
     Effect.gen(function* () {

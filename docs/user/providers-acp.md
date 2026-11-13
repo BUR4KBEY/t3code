@@ -125,6 +125,18 @@ Registry agents can schedule work and use T3's MCP tools. Child-task presentatio
 the agent exposes: ACP has no portable native subagent-lineage contract, so richer delegation views
 remain agent-specific.
 
+## omp
+
+Add omp as a local command: executable `omp` (or a wrapper whose name starts with `omp-`) with the
+argument `acp`. T3 Code loads a small extension into omp, so omp's `task` subagents get their own
+cards and read-only child threads with live transcripts, and **Stop** cancels a running subagent.
+
+omp's background jobs (`bash`, `eval`, or a `task` it did not wait for) appear under background
+work, and the thread stays **Working** until they finish. omp does not resume on its own when a job
+ends after its turn, so T3 Code sends it a short follow-up message to read the result. Services
+started with a name keep running without holding the thread. If the extension cannot load, cards
+still appear from what omp reports over ACP, without transcripts or **Stop**.
+
 ## Checkpoints
 
 Checkpoint rollback restores your files as usual. ACP agents cannot rewind their own conversation,
