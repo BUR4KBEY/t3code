@@ -42,6 +42,29 @@ By default it returns the saved snapshot. `refresh: true` re-checks every provid
 
 The tool lives in `apps/server/src/mcp/toolkits/environment/`, next to `t3_environment_read`, with the same access rules; it is also on Claude's read-only tool allowlist. It reuses the UI's normalizer through `collectDriverUsageLimits` in `packages/shared/src/usageLimits.ts`. Adding it raises `mcpToolListJsonBytes` in `apps/server/src/provider/agentContextBudget.json`; after a rebase that changes tool text, rerun `apps/server/src/provider/AgentContextBudget.test.ts` and copy the measured value.
 
+### omp subagents and background jobs
+
+Upstream runs omp through the generic ACP Registry adapter, which shows a `task` call as a plain tool row and never shows background jobs. The fork gives omp the same subagent and background-work views Claude gets:
+
+- every child of a `task` call gets its own subagent card with live status, prompt, name, model and result, and a read-only child thread that streams its messages and tool calls
+- **Stop** on a running omp subagent cancels it
+- async `bash` and `eval` jobs appear under background work and keep the thread Working until they finish
+- when a job finishes after omp's turn ended, T3 sends omp a short follow-up message so it reads the result
+
+omp is detected by its command name: `omp`, or a wrapper named `omp-*` such as `omp-devenv`. Nothing changes in omp itself.
+
+Over ACP alone omp reports subagent progress only while a prompt is open, sends nothing about background jobs, and never starts a turn on its own when a job finishes. So the server carries a small omp extension ([`ompBridgeExtension.ts`](./packages/provider-acp-registry/src/server/ompBridgeExtension.ts)). For each omp process T3 writes it to a temporary directory next to a Unix socket and launches omp with `--extension <file>` and `T3_OMP_BRIDGE_SOCKET=<socket>`. omp loads the extension into the main session and into every subagent session, and it reports child messages, child tool calls, child ends and the job list over the socket; T3 sends `cancel` back for Stop. The flavor that maps all this onto threads is [`ompAcp.ts`](./packages/provider-acp-registry/src/server/ompAcp.ts). The protocol is versioned; if the extension does not connect, cards still appear from the ACP data, without transcripts or Stop, and subagents still running when the turn ends settle as idle.
+
+Behavior worth knowing:
+
+- A turn whose subagents are still running stays Working after omp's own reply, because only the extension can report them finishing.
+- The follow-up after background work is a separate run in the thread ("N background tasks finished"), not part of the original run.
+- `bash` services started with a name (`name`/`ready`) are not jobs, so they never hold the thread.
+- Only direct children of the main session get cards. Deeper subagents show up as tool rows in their parent's thread.
+- Tested on Linux only.
+
+Shared changes outside the omp code: the ACP adapter's `extractSubagentUpdate` hook may return several subagents for one tool call, and subagents carry an optional `stoppable` flag that the web, mobile and server Stop checks accept next to Claude. The `t3_background_wait` MCP tool works for omp too, which raised `mcpToolListJsonBytes` in `apps/server/src/provider/agentContextBudget.json`.
+
 ## Installing on Arch Linux
 
 `packaging/fork/PKGBUILD` builds a package named `t3code-nightly-patched`. It replaces `t3code-nightly-bin`.
