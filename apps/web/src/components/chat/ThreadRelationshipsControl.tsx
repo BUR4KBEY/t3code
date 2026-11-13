@@ -476,6 +476,7 @@ export function ThreadRelationshipsPanel(props: {
           providerInstanceId: subagent.providerInstanceId,
           origin: subagent.origin,
           modelSelection: subagent.modelSelection,
+          stoppable: subagent.stoppable,
         },
       ]),
   );
@@ -723,7 +724,7 @@ export function ThreadRelationshipsPanel(props: {
       agent &&
       (agent.origin === "app_owned" ||
         (agent.origin === "provider_native" &&
-          agent.driver === "claudeAgent" &&
+          (agent.driver === "claudeAgent" || agent.stoppable === true) &&
           agent.runId != null &&
           agent.nativeTaskRef?.strength === "strong" &&
           agent.nativeTaskRef.nativeId !== null &&

@@ -142,6 +142,16 @@ checkpoints but cannot roll back its conversation. The [checkpoint boundary](./o
 therefore rejects revert before touching files. Native permission and question option IDs must
 also survive normalization; a display label is not necessarily a valid reply.
 
+omp over ACP never starts a turn on its own: when no `session/prompt` is open it only queues a
+finished background job's result for the next prompt, and it sends no updates for jobs or
+subagents after a prompt returns. ACP has no channel for that state, so T3 ships an omp extension
+inside the server ([source](../../packages/provider-acp-registry/src/server/ompBridgeExtension.ts))
+and writes it next to a per-process socket at launch. The
+[flavor](../../packages/provider-acp-registry/src/server/ompAcp.ts) holds the run while bridged
+subagents run, lists running jobs as `pendingBackgroundTasks`, and sends a wake prompt when a job
+settles with no prompt open. Without a connected bridge it falls back to ACP data alone, so it
+must never hold a run or offer Stop that only the bridge could finish.
+
 ## Attachments and stored history
 
 Attachments live outside the project workspace. The

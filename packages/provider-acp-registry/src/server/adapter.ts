@@ -15,6 +15,7 @@ import {
   isCopilotLostSessionError,
   makeCopilotSubagentRouting,
 } from "./copilotAcp.ts";
+import { isOmpCommand, makeOmpBridgeHost, type OmpLaunch } from "./ompAcp.ts";
 import { defaultInstanceIdForDriver, ProviderDriverKind } from "@t3tools/contracts";
 import { readCustomModelEntries } from "@t3tools/shared/model";
 import { AcpRegistrySettings } from "../settings.ts";
@@ -133,6 +134,7 @@ export function acpRegistryPromptFailure(agentId: string, cause: unknown) {
 function makeAcpRegistryRuntime(
   options: AcpRegistryAdapterV2Options,
   catalog: AcpRegistrySupport.AcpRegistryCatalog["Service"],
+  ompLaunch: OmpLaunch | undefined,
 ) {
   return (
     input: AcpAdapterV2RuntimeInput,
@@ -154,25 +156,29 @@ function makeAcpRegistryRuntime(
               }),
           ),
         );
+      const spawn =
+        processEnvironment === undefined
+          ? resolved.spawn
+          : {
+              ...resolved.spawn,
+              env: { ...resolved.spawn.env, ...processEnvironment },
+            };
+      const launch = ompLaunch === undefined ? undefined : yield* ompLaunch(spawn);
       const context = yield* Layer.build(
         AcpSessionRuntime.layer({
           ...runtimeInput,
-          spawn:
-            processEnvironment === undefined
-              ? resolved.spawn
-              : {
-                  ...resolved.spawn,
-                  env: { ...resolved.spawn.env, ...processEnvironment },
-                },
+          spawn: launch?.spawn ?? spawn,
           ...(options.settings.authMethodId ? { authMethodId: options.settings.authMethodId } : {}),
           customModels: readCustomModelEntries(options.settings.customModels).map(
             (entry) => entry.slug,
           ),
         }),
       );
-      return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
+      const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
         Effect.provide(context),
       );
+      launch?.attach(runtime);
+      return runtime;
     });
 }
 
@@ -209,6 +215,11 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       }
     : options;
   const copilotRouting = isCopilot ? makeCopilotSubagentRouting() : undefined;
+  const ompHost =
+    options.settings.source === "local" && isOmpCommand(options.settings.commandPath)
+      ? makeOmpBridgeHost()
+      : undefined;
+  const ompLaunch = ompHost?.launch(yield* FileSystem.FileSystem, yield* Path.Path);
   const flavor: AcpAdapterV2Flavor = {
     driver: ACP_REGISTRY_PROVIDER,
     // Cancelling a Copilot prompt also kills the background agents it started.
@@ -258,7 +269,18 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
           extractSubagentUpdate: extractCopilotSubagentUpdate,
           restartRuntimeAfterPromptError: isCopilotLostSessionError,
         }),
-    makeRuntime: options.makeRuntime ?? makeAcpRegistryRuntime(runtimeOptions, catalog),
+    ...(ompHost === undefined
+      ? {}
+      : {
+          registerExtensions: ompHost.registerExtensions,
+          extractSubagentUpdate: ompHost.extractSubagentUpdate,
+          stopSubagent: ompHost.stopSubagent,
+          reportsBackgroundTasks: true,
+          // The bridge reports children and jobs after the prompt returns; ACP alone does not.
+          deferFinalizeForBackgroundWork: ompHost.connected,
+          subagentsIdleOnTurnCompletion: (runtime) => !ompHost.connected(runtime),
+        }),
+    makeRuntime: options.makeRuntime ?? makeAcpRegistryRuntime(runtimeOptions, catalog, ompLaunch),
     ...(runtimeCoordinator === undefined
       ? {}
       : {

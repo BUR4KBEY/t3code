@@ -31,6 +31,7 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { acpSubagentUpdates } from "@t3tools/provider-acp/server/adapter";
 import { makeAntigravityAcpRuntime } from "../../provider/acp/AntigravityAcpSupport.ts";
 import { normalizeAntigravitySessionUpdate } from "../../provider/acp/AntigravityProtocol.ts";
 import { ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE } from "../../provider/antigravityAuthSupport.ts";
@@ -66,7 +67,7 @@ function permissionRequest(
 
 describe("AntigravityAdapterV2 flavor", () => {
   it("keeps a successful subagent launch running until the parent turn becomes idle", () => {
-    const batch = flavor.extractSubagentUpdate?.({
+    const [batch] = acpSubagentUpdates(flavor, {
       toolCallId: "trajectory:4",
       title: "Running start_subagent",
       kind: "other",
@@ -79,7 +80,7 @@ describe("AntigravityAdapterV2 flavor", () => {
     assert.isTrue(flavor.subagentsIdleOnTurnCompletion);
 
     // Permission prompts carry the launch; later updates for the same call do not.
-    const launch = flavor.extractSubagentUpdate?.({
+    const [launch] = acpSubagentUpdates(flavor, {
       toolCallId: "35bea692fa95447fbdae6333fec5515f",
       title: "Run invoke_subagent?",
       kind: "other",
