@@ -56,15 +56,21 @@ function connect() {
 function cancelChild(agentId) {
   const ctx = children.get(agentId);
   if (ctx === undefined) return;
+  // A child idle until its jobs report back gets no agent_end from abort, so report it here.
+  const idle = ctx.isIdle();
   Promise.resolve(ctx.abort())
     .catch(() => {})
     .then(() => {
       const session = omp?.AgentRegistry?.global().get(agentId)?.session;
       const snapshot = ctx.getAsyncJobSnapshot();
-      if (!session || !snapshot) return;
-      for (const job of snapshot.running) session.cancelAsyncJob(job.id);
+      if (session && snapshot) {
+        for (const job of snapshot.running) session.cancelAsyncJob(job.id);
+      }
     })
-    .catch(() => {});
+    .catch(() => {})
+    .then(() => {
+      if (idle) send({ t: "end", agent: who(ctx), status: "cancelled", result: null });
+    });
 }
 
 function who(ctx) {
