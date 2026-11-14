@@ -74,6 +74,25 @@ describe("backgroundWorkNotification", () => {
       summary: "4 subagents finished",
     });
   });
+
+  it("does not report finished work as stopped when the rest was stopped", () => {
+    assert.equal(
+      backgroundWorkNotification([
+        { kind: "subagent", label: "Napper", outcome: "cancelled" },
+        { kind: "subagent", label: "Keeper", outcome: "completed" },
+      ]).summary,
+      'Subagent "Napper" was stopped, subagent "Keeper" finished',
+    );
+    const counted = ["a", "b", "c", "d"].map((label, index) => ({
+      kind: "subagent" as const,
+      label,
+      outcome: index === 0 ? ("cancelled" as const) : ("completed" as const),
+    }));
+    assert.equal(
+      backgroundWorkNotification(counted)?.summary,
+      "1 subagent was stopped, 3 subagents finished",
+    );
+  });
 });
 
 describe("notificationTurnItem", () => {
