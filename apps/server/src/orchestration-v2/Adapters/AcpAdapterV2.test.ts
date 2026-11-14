@@ -3340,7 +3340,7 @@ describe("AcpAdapterV2", () => {
         // Alpha ends both as a card and as a job; the wake names it once.
         assert.equal(
           wake.notification?.summary,
-          'Subagent "Alpha" and command "make" were stopped',
+          'Subagent "Alpha" was stopped, command "make" finished',
         );
         yield* omp.takeUntil(
           (event) =>

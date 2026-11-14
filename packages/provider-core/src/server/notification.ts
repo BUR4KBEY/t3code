@@ -85,7 +85,6 @@ function joinNames(names: ReadonlyArray<string>): string {
 
 function reportsSummary(
   reports: readonly [BackgroundWorkReport, ...ReadonlyArray<BackgroundWorkReport>],
-  outcome: NotificationOutcome,
 ): string {
   const [first] = reports;
   if (reports.length === 1) {
@@ -93,20 +92,33 @@ function reportsSummary(
     const noun = KIND_NOUN[first.kind][0];
     return `${noun}${label === undefined ? "" : ` "${label}"`} ${outcomeVerb(first.kind, first.outcome)}${exitSuffix(first)}`;
   }
-  const verb =
-    outcome === "failed"
-      ? "failed"
-      : outcome === "cancelled"
-        ? "were stopped"
-        : outcome === "updated"
-          ? "updated"
-          : "finished";
-  if (reports.length > 3 || reports.every((report) => reportLabel(report.label) === undefined)) {
-    const kinds = new Set(reports.map((report) => report.kind));
-    const noun = kinds.size === 1 ? KIND_NOUN[first.kind][1] : "background tasks";
-    return `${reports.length} ${noun} ${verb}`;
+  // Work that ended differently gets one clause per outcome, so a finished task never reads as stopped.
+  const byVerb = new Map<string, Array<BackgroundWorkReport>>();
+  for (const report of reports) {
+    const verb = outcomeVerb(report.kind, report.outcome);
+    byVerb.set(verb, [...(byVerb.get(verb) ?? []), report]);
   }
-  return `${joinNames(reports.map((report, index) => namedReport(report, index === 0)))} ${verb}`;
+  const named =
+    reports.length <= 3 && reports.some((report) => reportLabel(report.label) !== undefined);
+  return [...byVerb]
+    .map(([verb, group], groupIndex) => {
+      const groupVerb = group.length > 1 && verb === "was stopped" ? "were stopped" : verb;
+      if (named) {
+        const names = group.map((report, index) =>
+          namedReport(report, groupIndex === 0 && index === 0),
+        );
+        return `${joinNames(names)} ${groupVerb}`;
+      }
+      const kinds = new Set(group.map((report) => report.kind));
+      const noun =
+        group.length === 1
+          ? KIND_NOUN[group[0]!.kind][0].toLowerCase()
+          : kinds.size === 1
+            ? KIND_NOUN[group[0]!.kind][1]
+            : "background tasks";
+      return `${group.length} ${noun} ${groupVerb}`;
+    })
+    .join(", ");
 }
 
 function reportsSource(
@@ -141,7 +153,7 @@ export function backgroundWorkNotification(
   return {
     source: reportsSource([first, ...rest]),
     outcome,
-    summary: reportsSummary([first, ...rest], outcome),
+    summary: reportsSummary([first, ...rest]),
   };
 }
 
