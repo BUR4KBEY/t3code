@@ -53,3 +53,4 @@ node_modules/
 # devenv (fork)
 .devenv*
 devenv.local.nix
+/packages/ssh/.ssh-launcher-test-*/

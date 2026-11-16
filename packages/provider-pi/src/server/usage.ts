@@ -140,11 +140,13 @@ export const piUsageReader: ProviderUsageReader<PiSettings, Path.Path> = {
   kind: "transcripts",
   provider: "pi",
   format: piUsageFormat,
+  // Pi model IDs are `<provider>/<rate model>`.
+  rateModel: (model) => model.slice(model.indexOf("/") + 1),
   directories: Effect.fn("piUsageReader.directories")(function* ({ config, environment }) {
     const path = yield* Path.Path;
     const home = yield* HostProcess.HomeDirectory;
     const platform = yield* HostProcess.Platform;
-    const launchHome = (platform === "win32" ? environment.USERPROFILE : environment.HOME) || home;
+    const launchHome = piHome(environment, home, platform);
     const sessionDirArg = config === undefined ? undefined : piLaunchSessionDir(config.launchArgs);
     const launchDir =
       sessionDirArg === undefined ? undefined : expandHomePath(sessionDirArg, launchHome);
@@ -153,7 +155,7 @@ export const piUsageReader: ProviderUsageReader<PiSettings, Path.Path> = {
       ...(launchDir !== undefined && path.isAbsolute(launchDir)
         ? [{ dir: path.resolve(launchDir) }]
         : []),
-      { dir: resolvePiSessionsDir(environment, home, path) },
+      { dir: resolvePiSessionsDir(environment, launchHome, path) },
     ];
   }),
 };
@@ -164,10 +166,19 @@ export const ompUsageReader: ProviderUsageReader<unknown, Path.Path> = {
   provider: "omp",
   format: makePiFamilyUsageFormat("omp"),
   directories: Effect.fn("ompUsageReader.directories")(function* ({ environment }) {
+    // Pi's overrides point omp at Pi's directory, which Pi's reader already counts; a directory
+    // listed by two providers also keeps the Usage page from answering from its saved scan.
+    if (
+      environment.PI_CODING_AGENT_SESSION_DIR?.trim() ||
+      environment.PI_CODING_AGENT_DIR?.trim()
+    ) {
+      return [];
+    }
     const path = yield* Path.Path;
     const home = yield* HostProcess.HomeDirectory;
+    const platform = yield* HostProcess.Platform;
     return [
-      { dir: resolvePiSessionsDir(environment, home, path, path.join(home, ".omp", "agent")) },
+      { dir: path.resolve(piHome(environment, home, platform), ".omp", "agent", "sessions") },
     ];
   }),
 };
@@ -185,15 +196,26 @@ function piLaunchSessionDir(launchArgs: string): string | undefined {
   return sessionDir;
 }
 
-/** Where Pi (or omp, via its default agent dir) stores session JSONL files, matching their own lookup. */
+/** The home Pi resolves `~` against: the instance's HOME (USERPROFILE on Windows), else the host's. */
+export function piHome(
+  environment: NodeJS.ProcessEnv,
+  hostHome: string,
+  platform: NodeJS.Platform,
+): string {
+  return (platform === "win32" ? environment.USERPROFILE : environment.HOME) || hostHome;
+}
+
+/** Where Pi stores session JSONL files for a provider environment, matching Pi's own lookup. */
 export function resolvePiSessionsDir(
   environment: NodeJS.ProcessEnv,
   home: string,
   path: Path.Path,
-  defaultAgentDir = path.join(home, ".pi", "agent"),
 ): string {
   const sessionDir = environment.PI_CODING_AGENT_SESSION_DIR?.trim();
   if (sessionDir) return path.resolve(expandHomePath(sessionDir, home));
   const agentDir = environment.PI_CODING_AGENT_DIR?.trim();
-  return path.resolve(agentDir ? expandHomePath(agentDir, home) : defaultAgentDir, "sessions");
+  return path.resolve(
+    agentDir ? expandHomePath(agentDir, home) : path.join(home, ".pi", "agent"),
+    "sessions",
+  );
 }

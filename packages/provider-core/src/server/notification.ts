@@ -71,11 +71,26 @@ function exitSuffix(report: BackgroundWorkReport): string {
     : "";
 }
 
-function namedReport(report: BackgroundWorkReport, capitalize: boolean): string {
+function namedReport(report: BackgroundWorkReport, capitalize: boolean, verb?: string): string {
   const noun = KIND_NOUN[report.kind][0];
   const label = reportLabel(report.label);
   const named = `${capitalize ? noun : noun.toLowerCase()}${label === undefined ? "" : ` "${label}"`}`;
-  return `${named}${exitSuffix(report)}`;
+  return `${named}${verb === undefined ? "" : ` ${verb}`}${exitSuffix(report)}`;
+}
+
+const OUTCOME_GROUPS = ["failed", "cancelled", "updated", "completed"] as const;
+
+function groupVerb(group: (typeof OUTCOME_GROUPS)[number], count: number): string {
+  switch (group) {
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return count === 1 ? "was stopped" : "were stopped";
+    case "updated":
+      return "updated";
+    case "completed":
+      return "finished";
+  }
 }
 
 function joinNames(names: ReadonlyArray<string>): string {
@@ -92,33 +107,30 @@ function reportsSummary(
     const noun = KIND_NOUN[first.kind][0];
     return `${noun}${label === undefined ? "" : ` "${label}"`} ${outcomeVerb(first.kind, first.outcome)}${exitSuffix(first)}`;
   }
-  // Work that ended differently gets one clause per outcome, so a finished task never reads as stopped.
-  const byVerb = new Map<string, Array<BackgroundWorkReport>>();
-  for (const report of reports) {
-    const verb = outcomeVerb(report.kind, report.outcome);
-    byVerb.set(verb, [...(byVerb.get(verb) ?? []), report]);
+  const groups = OUTCOME_GROUPS.flatMap((group) => {
+    const count = reports.filter(
+      (report) => (report.outcome === "unknown" ? "completed" : report.outcome) === group,
+    ).length;
+    return count === 0 ? [] : [{ group, count }];
+  });
+  if (reports.length > 3 || reports.every((report) => reportLabel(report.label) === undefined)) {
+    const kinds = new Set(reports.map((report) => report.kind));
+    const [noun, nouns] = kinds.size === 1 ? KIND_NOUN[first.kind] : KIND_NOUN.background_task;
+    return joinNames(
+      groups.map(
+        ({ group, count }, index) =>
+          `${count}${index === 0 ? ` ${count === 1 ? noun.toLowerCase() : nouns}` : ""} ${groupVerb(group, count)}`,
+      ),
+    );
   }
-  const named =
-    reports.length <= 3 && reports.some((report) => reportLabel(report.label) !== undefined);
-  return [...byVerb]
-    .map(([verb, group], groupIndex) => {
-      const groupVerb = group.length > 1 && verb === "was stopped" ? "were stopped" : verb;
-      if (named) {
-        const names = group.map((report, index) =>
-          namedReport(report, groupIndex === 0 && index === 0),
-        );
-        return `${joinNames(names)} ${groupVerb}`;
-      }
-      const kinds = new Set(group.map((report) => report.kind));
-      const noun =
-        group.length === 1
-          ? KIND_NOUN[group[0]!.kind][0].toLowerCase()
-          : kinds.size === 1
-            ? KIND_NOUN[group[0]!.kind][1]
-            : "background tasks";
-      return `${group.length} ${noun} ${groupVerb}`;
-    })
-    .join(", ");
+  if (groups.length > 1) {
+    return joinNames(
+      reports.map((report, index) =>
+        namedReport(report, index === 0, outcomeVerb(report.kind, report.outcome)),
+      ),
+    );
+  }
+  return `${joinNames(reports.map((report, index) => namedReport(report, index === 0)))} ${groupVerb(groups[0]!.group, reports.length)}`;
 }
 
 function reportsSource(
