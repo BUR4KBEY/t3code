@@ -42,6 +42,21 @@ By default it returns the saved snapshot. `refresh: true` re-checks every provid
 
 The tool lives in `apps/server/src/mcp/toolkits/environment/`, next to `t3_environment_read`, with the same access rules; it is also on Claude's read-only tool allowlist. It reuses the UI's normalizer through `collectDriverUsageLimits` in `packages/shared/src/usageLimits.ts`. Adding it raises `mcpToolListJsonBytes` in `apps/server/src/provider/agentContextBudget.json`; after a rebase that changes tool text, rerun `apps/server/src/provider/AgentContextBudget.test.ts` and copy the measured value.
 
+### Pause agents at a usage threshold
+
+Upstream reacts only when a limit is already hit (auto-resume and snooze after a usage-limit failure). The fork can stop agents earlier, so some usage is left for your own work. Turn on **Pause agents at a usage threshold** in Settings → Threads → Usage limits, on web or mobile. It is off by default and set separately on each server. The threshold is the percent of usage left, 20% by default. You can also pick which windows count (session, weekly, monthly, other), whether a provider's accounts are pooled or counted one by one, and which providers and accounts to watch. Nothing picked means all.
+
+When a watched window drops from above the threshold to it, the server stops every agent then running on that provider, delegated agents included, and holds their queued messages. This happens once per window: anything you start afterwards runs freely, and it can fire again only after the window resets above the threshold. When the window resets, each stopped thread is continued the way **Resume** would, and its queue is released. A banner in the thread says when it continues and offers **Don't continue automatically**; **Resume** continues it early.
+
+Behavior worth knowing:
+
+- A window that is already below the threshold when the server starts, or when you turn the setting on, does not fire. The above/below state lives in memory, so a crossing that happens while the server is down is missed.
+- CLIProxyAPI rotates accounts, so T3 cannot tell which account a thread uses. A crossing stops every thread on that provider, even in per-account mode.
+- With no known reset time the thread is not continued automatically; its stop message says to continue by hand.
+- Agents can read the setting through `t3_environment_read` but cannot change it. It was left out of `t3_environment_preferences_update` to keep `mcpToolListJsonBytes` unchanged.
+
+The worker is [`UsageThresholdPauseWorker.ts`](./apps/server/src/orchestration-v2/UsageThresholdPauseWorker.ts), on the existing scheduler tick. It reads usage through `collectDriverUsageLimits`, records `usagePause: { runId, resumeAt }` on the thread, and uses the existing `thread.stop`, manual continuation and `queue.resume` commands. Shared changes outside it: the `usageThresholdPause` setting and the thread's `usagePause` field in `packages/contracts`, two projection queries in `ProjectionStore.ts`, and `mayStartSubagentFollowup` in `Orchestrator.ts` now accepting manual continuations, so a resumed delegated agent still reports back to its parent.
+
 ### omp subagents and background jobs
 
 Upstream runs omp through the generic ACP Registry adapter, which shows a `task` call as a plain tool row and never shows background jobs. The fork gives omp the same subagent and background-work views Claude gets:
