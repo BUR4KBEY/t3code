@@ -32,6 +32,7 @@ const PreferenceFields = {
     customInstructions: Schema.String,
     truncated: Schema.Boolean,
   }),
+  usageThresholdPause: ServerSettings.fields.usageThresholdPause,
 };
 const shared = {
   failure: OrchestratorMcpFailure,

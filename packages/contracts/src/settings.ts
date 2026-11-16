@@ -53,6 +53,7 @@ import {
   ProviderInstanceId,
   ProviderDriverKind,
 } from "./providerInstance.ts";
+import { ServerProviderUsageWindow } from "./providerUsageLimits.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 import {
   CloudSpeechModelId,
@@ -1347,6 +1348,32 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+export const UsageThresholdPauseAggregation = Schema.Literals(["pooled", "perAccount"]);
+export type UsageThresholdPauseAggregation = typeof UsageThresholdPauseAggregation.Type;
+export const UsageThresholdPauseRemainingPercent = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 99 }),
+);
+/** Stops agents running when usage first drops below `remainingPercent`, and continues them at reset. */
+export const UsageThresholdPauseSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  remainingPercent: UsageThresholdPauseRemainingPercent.pipe(
+    Schema.withDecodingDefault(Effect.succeed(20)),
+  ),
+  windowKinds: Schema.Array(ServerProviderUsageWindow.fields.kind).pipe(
+    Schema.withDecodingDefault(Effect.succeed(["session", "weekly"] as const)),
+  ),
+  aggregation: UsageThresholdPauseAggregation.pipe(
+    Schema.withDecodingDefault(Effect.succeed("pooled" as const)),
+  ),
+  /** Empty means every provider. */
+  drivers: Schema.Array(ProviderDriverKind).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** Usage-report account ids; empty means every account. */
+  accountIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type UsageThresholdPauseSettings = typeof UsageThresholdPauseSettings.Type;
+
 const CloudSpeechCredential = SettingsSecretValue.pipe(
   Schema.withDecodingDefault(Effect.succeed("")),
 );
@@ -1365,6 +1392,9 @@ export const ServerSettings = Schema.Struct({
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
+  ),
+  usageThresholdPause: UsageThresholdPauseSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(UsageThresholdPauseSettings)({}))),
   ),
 
   worktreesDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1837,6 +1867,16 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+    }),
+  ),
+  usageThresholdPause: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      remainingPercent: Schema.optionalKey(UsageThresholdPauseRemainingPercent),
+      windowKinds: Schema.optionalKey(Schema.Array(ServerProviderUsageWindow.fields.kind)),
+      aggregation: Schema.optionalKey(UsageThresholdPauseAggregation),
+      drivers: Schema.optionalKey(Schema.Array(ProviderDriverKind)),
+      accountIds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),

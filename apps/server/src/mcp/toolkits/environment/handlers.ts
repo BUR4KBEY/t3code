@@ -28,6 +28,7 @@ export function preferences(settings: ServerSettings) {
     enableProviderUpdateChecks,
     backgroundActivity,
     sourceControlWritingStyle,
+    usageThresholdPause,
   } = settings;
   const characters = Array.from(sourceControlWritingStyle.customInstructions);
   return {
@@ -40,6 +41,7 @@ export function preferences(settings: ServerSettings) {
       customInstructions: characters.slice(0, 4000).join(""),
       truncated: characters.length > 4000,
     },
+    usageThresholdPause,
   };
 }
 // Allowlist only: report accounts also carry emails, credit ids and hub ids.

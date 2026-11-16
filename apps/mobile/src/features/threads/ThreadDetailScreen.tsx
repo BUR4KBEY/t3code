@@ -15,6 +15,7 @@ import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entitie
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
 import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
+import { UsagePauseCard } from "./UsagePauseCard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
   effectiveSnoozed,
@@ -1664,6 +1665,11 @@ function ThreadDetailBody(
                     ) : null}
                     <UsageLimitRecoveryCard
                       key={props.selectedThread.latestRun?.runId}
+                      thread={props.selectedThread}
+                      environmentId={props.environmentId}
+                    />
+                    <UsagePauseCard
+                      key={`usage-pause:${props.selectedThread.latestRun?.runId}`}
                       thread={props.selectedThread}
                       environmentId={props.environmentId}
                     />

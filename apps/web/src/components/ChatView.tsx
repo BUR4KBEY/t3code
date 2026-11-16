@@ -38,6 +38,7 @@ import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
 import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
+import { usagePauseBannerItem } from "./chat/UsagePauseBanner";
 import { isThreadEnvironmentLocked, resolveDraftHeroState } from "./ChatView.logic";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
@@ -79,6 +80,7 @@ import {
   RuntimeMode,
 } from "@t3tools/contracts";
 import {
+  activeUsagePause,
   canResumeThread,
   deriveProviderSubagentStatus,
   deriveProviderExtensionStatuses,
@@ -2608,6 +2610,21 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  const usagePause = activeThreadShell === null ? null : activeUsagePause(activeThreadShell.source);
+  const usagePauseBanner =
+    usagePause !== null && activeThreadShell !== null
+      ? usagePauseBannerItem({
+          pause: usagePause,
+          timestampFormat,
+          onCancel: async () => {
+            const result = await updateThreadMetadata({
+              environmentId,
+              input: { threadId: activeThreadShell.id, usagePause: null },
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          },
+        })
+      : null;
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2654,7 +2671,9 @@ export default function ChatView(props: ChatViewProps) {
             }),
           ]
         : [];
-    const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    const limitRecoveryItems = [limitRecoveryBanner, usagePauseBanner].filter(
+      (item) => item !== null,
+    );
     const extensionStatusBanner = extensionStatusBannerItem(
       deriveProviderExtensionStatuses(serverProjection),
     );

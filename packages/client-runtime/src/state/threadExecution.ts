@@ -19,6 +19,7 @@ import {
   type ServerProviderModel,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2LimitRecovery,
+  type OrchestrationV2UsagePause,
   type OrchestrationV2ThreadProjection,
   orchestrationV2RunWorkStartedAt,
   type RunId,
@@ -481,6 +482,15 @@ export function limitRecoveryOwnsSnooze(input: {
     snoozedUntil != null &&
     Date.parse(snoozedUntil) === Date.parse(resetAt)
   );
+}
+
+/** The usage threshold stop the thread still shows: any newer run supersedes it. */
+export function activeUsagePause(thread: {
+  readonly usagePause?: OrchestrationV2UsagePause | null | undefined;
+  readonly latestRunId: RunId | null;
+}): OrchestrationV2UsagePause | null {
+  const pause = thread.usagePause ?? null;
+  return pause !== null && pause.runId === thread.latestRunId ? pause : null;
 }
 
 export function threadRuntimeHasInterruptibleRun(
