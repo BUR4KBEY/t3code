@@ -850,7 +850,8 @@ function mayStartSubagentFollowup(
   return (
     command.createdBy === "user" ||
     command.creationSource === "mcp" ||
-    command.usageLimitContinuationOfRunId !== undefined
+    command.usageLimitContinuationOfRunId !== undefined ||
+    command.manualContinuationOfRunId !== undefined
   );
 }
 
@@ -4708,6 +4709,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             limitRecovery: thread.limitRecovery
               ? { ...thread.limitRecovery, autoResume: false, snooze: false }
               : thread.limitRecovery,
+            usagePause: null,
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             unsettledAt: null,
             pinnedAt: null,
@@ -4852,6 +4854,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             ...(command.title === undefined ? {} : { title: command.title }),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
+            ...(command.usagePause === undefined ? {} : { usagePause: command.usagePause }),
             ...(command.limitRecovery !== undefined &&
             limitRecovery?.snooze === true &&
             Date.parse(limitRecovery.resetAt) > DateTime.toEpochMillis(now)

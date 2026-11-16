@@ -139,6 +139,7 @@ const AUTO_SETTLE_SETTING_KEYS: ReadonlySet<string> = new Set([
   "sidebarAutoSettleAfterDays",
   "autoResumeLimitedThreads",
   "snoozeLimitedThreads",
+  "usageThresholdPause",
 ]);
 
 function planServerSettingsWrites(
@@ -157,6 +158,17 @@ function planServerSettingsWrites(
       ? planMobileScopedSettingsPatch(others, projectSelected, othersPatch)
       : []),
   ];
+}
+
+// Usage pause rows send partial patches, so a queued one must not drop an earlier field.
+function mergeQueuedPatches(first: ServerSettingsPatch, next: ServerSettingsPatch) {
+  return first.usageThresholdPause && next.usageThresholdPause
+    ? {
+        ...first,
+        ...next,
+        usageThresholdPause: { ...first.usageThresholdPause, ...next.usageThresholdPause },
+      }
+    : { ...first, ...next };
 }
 
 export function SettingsThreadsRouteScreen() {
@@ -215,7 +227,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
       const queued = queuedPatch.current;
       queuedPatch.current = {
         key: targetsKey,
-        patch: queued?.key === targetsKey ? { ...queued.patch, ...patch } : patch,
+        patch: queued?.key === targetsKey ? mergeQueuedPatches(queued.patch, patch) : patch,
       };
       return;
     }
@@ -239,7 +251,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
       queuedPatch.current = null;
       // These targets may not show this write yet, so send it again with the
       // queued patch; project overrides are replaced whole.
-      if (queued?.key === targetsKey) write({ ...patch, ...queued.patch });
+      if (queued?.key === targetsKey) write(mergeQueuedPatches(patch, queued.patch));
     });
   };
   const clearProjectOverrides = () => {

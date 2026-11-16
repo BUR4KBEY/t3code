@@ -9614,6 +9614,97 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("continues a threshold-stopped run from the server and releases its queue", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-layer-usage-threshold-pause");
+      const messageId = (key: string) => MessageId.make(`${threadId}:${key}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make(`${threadId}:create`),
+        threadId,
+        projectId: ProjectId.make(`${threadId}:project`),
+        title: "Usage threshold pause",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+      });
+      for (const [key, start] of [
+        ["active", true],
+        ["queued", false],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${threadId}:message:${key}`),
+          threadId,
+          messageId: messageId(key),
+          text: key,
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: start ? "start_immediately" : "queue_after_active" },
+        });
+      }
+      const runFor = (key: string) =>
+        Effect.map(orchestrator.getThreadProjection(threadId), ({ runs }) =>
+          runs.find((candidate) => candidate.userMessageId === messageId(key)),
+        );
+      const stopped = yield* runFor("active");
+      assert.isDefined(stopped);
+      const usagePause = { runId: stopped.id, resumeAt: "2026-11-16T11:00:00.000Z" };
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make(`${threadId}:pause`),
+        threadId,
+        usagePause,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.stop",
+        commandId: CommandId.make(`${threadId}:stop`),
+        threadId,
+        reason: "Paused at the usage threshold",
+        stopDelegatedTasks: false,
+      });
+      const held = yield* orchestrator.getThreadProjection(threadId);
+      assert.deepEqual(held.thread.usagePause, usagePause);
+      assert.equal(held.runs.find((run) => run.id === stopped.id)?.status, "interrupted");
+      assert.isTrue((yield* runFor("queued"))?.queueHeld);
+
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "system",
+        creationSource: "server",
+        commandId: CommandId.make(`${threadId}:continue`),
+        threadId,
+        messageId: messageId("continue"),
+        manualContinuationOfRunId: stopped.id,
+        text: "",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+      });
+      yield* orchestrator.dispatch({
+        type: "queue.resume",
+        commandId: CommandId.make(`${threadId}:resume`),
+        threadId,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make(`${threadId}:clear`),
+        threadId,
+        usagePause: null,
+      });
+      const resumed = yield* orchestrator.getThreadProjection(threadId);
+      assert.isNull(resumed.thread.usagePause);
+      assert.isDefined(yield* runFor("continue"));
+      assert.isFalse((yield* runFor("queued"))?.queueHeld);
+    }),
+  );
+
   it.effect.each([false, true])(
     "starts the queue before a send that arrives as the active run ends (worktree failed: %s)",
     (worktreeFailed) =>

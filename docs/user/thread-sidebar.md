@@ -269,6 +269,13 @@ the snooze. Enable **Snooze until limits reset** in thread behavior settings to
 snooze limit stops by default. Providers without a reset time offer manual
 retry and the normal snooze choices.
 
+To stop before a limit hits, enable **Pause agents at a usage threshold** in
+**Settings → Threads** and set how much usage must remain. When a watched usage
+window first drops to that amount, the environment stops running agents, holds
+their queues, and continues them when the window resets. Choose **Don't
+continue automatically** in a paused thread to keep it stopped, or press
+**Resume** to continue early.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to

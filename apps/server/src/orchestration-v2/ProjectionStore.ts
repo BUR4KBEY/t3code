@@ -43,6 +43,7 @@ import type {
   OrchestrationV2ThreadShell,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
+  OrchestrationV2UsagePause,
   GuestShareId,
   ProviderThreadId,
   ProviderTurnId,
@@ -634,6 +635,22 @@ export interface ProjectionStoreV2Shape {
   readonly getLimitRecoveryWakeAt: (
     now: DateTime.Utc,
   ) => Effect.Effect<number | null, ProjectionStoreV2Error>;
+  /** Runs whose agent is working now, which a usage threshold stop interrupts. */
+  readonly listLiveRuns: () => Effect.Effect<
+    ReadonlyArray<{
+      readonly threadId: ThreadId;
+      readonly runId: RunId;
+      readonly providerInstanceId: ProviderInstanceId;
+    }>,
+    ProjectionStoreV2Error
+  >;
+  readonly listUsagePausedThreads: () => Effect.Effect<
+    ReadonlyArray<{
+      readonly threadId: ThreadId;
+      readonly usagePause: OrchestrationV2UsagePause;
+    }>,
+    ProjectionStoreV2Error
+  >;
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionSettlementCandidate>, ProjectionStoreV2Error>;
@@ -1882,6 +1899,7 @@ export function threadShellFromProjection(
     titleRegeneration: projection.thread.titleRegeneration ?? null,
     lastTitleRegeneration: projection.thread.lastTitleRegeneration ?? null,
     limitRecovery: projection.thread.limitRecovery ?? null,
+    usagePause: projection.thread.usagePause ?? null,
     deletedAt: projection.thread.deletedAt,
   };
 }
@@ -2194,6 +2212,7 @@ function shellFromState(input: {
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
     lastTitleRegeneration: input.state.thread.lastTitleRegeneration ?? null,
     limitRecovery: input.state.thread.limitRecovery ?? null,
+    usagePause: input.state.thread.usagePause ?? null,
     deletedAt: input.state.thread.deletedAt,
   };
 }
@@ -4801,6 +4820,54 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           (value): value is number => value != null,
         );
         return wakes.length === 0 ? null : Math.round(Math.min(...wakes));
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
+    const listLiveRuns = Effect.fn("ProjectionStore.listLiveRuns")(
+      function* () {
+        const rows = yield* sql<{
+          readonly thread_id: string;
+          readonly run_id: string;
+          readonly provider_instance_id: string;
+        }>`
+          SELECT r.thread_id, r.run_id,
+            json_extract(r.payload_json, '$.providerInstanceId') AS provider_instance_id
+          FROM orchestration_v2_projection_runs r
+          INNER JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
+          WHERE r.status IN ('preparing', 'starting', 'running')
+            AND t.deleted_at IS NULL
+            AND t.archived_at IS NULL
+          ORDER BY r.thread_id
+        `;
+        return rows.map((row) => ({
+          threadId: ThreadId.make(row.thread_id),
+          runId: RunId.make(row.run_id),
+          providerInstanceId: ProviderInstanceId.make(row.provider_instance_id),
+        }));
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
+    const listUsagePausedThreads = Effect.fn("ProjectionStore.listUsagePausedThreads")(
+      function* () {
+        const rows = yield* sql<{
+          readonly thread_id: string;
+          readonly run_id: string;
+          readonly resume_at: string | null;
+        }>`
+          SELECT thread_id,
+            json_extract(payload_json, '$.usagePause.runId') AS run_id,
+            json_extract(payload_json, '$.usagePause.resumeAt') AS resume_at
+          FROM orchestration_v2_projection_threads
+          WHERE deleted_at IS NULL
+            AND json_type(payload_json, '$.usagePause') = 'object'
+          ORDER BY thread_id
+        `;
+        return rows.map((row) => ({
+          threadId: ThreadId.make(row.thread_id),
+          usagePause: { runId: RunId.make(row.run_id), resumeAt: row.resume_at },
+        }));
       },
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
@@ -9357,6 +9424,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getProviderControlContext: readOnReader(getProviderControlContext),
       getLimitRecoveryCandidates: readOnReader(getLimitRecoveryCandidates),
       getLimitRecoveryWakeAt: readOnReader(getLimitRecoveryWakeAt),
+      listLiveRuns: readOnReader(listLiveRuns),
+      listUsagePausedThreads: readOnReader(listUsagePausedThreads),
       getRecoveryThreadIds: readOnReader(getRecoveryThreadIds),
       getUnreadableThreadIds: readOnReader(getUnreadableThreadIds),
       getThreadSnapshot: readOnReader(getThreadSnapshot),

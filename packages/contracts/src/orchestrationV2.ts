@@ -437,6 +437,13 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
 );
 export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
+/** A run the usage threshold stopped; `resumeAt` null means no reset time was known. */
+export const OrchestrationV2UsagePause = Schema.Struct({
+  runId: RunId,
+  resumeAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationV2UsagePause = typeof OrchestrationV2UsagePause.Type;
+
 /**
  * `score` is an open count that halves every two weeks, as of `openedAt`.
  * `picks` stores lowercase palette queries, newest first.
@@ -507,6 +514,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   lastSnoozeWakeAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
+  usagePause: Schema.optional(Schema.NullOr(OrchestrationV2UsagePause)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -2268,6 +2276,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
+  usagePause: Schema.optional(Schema.NullOr(OrchestrationV2UsagePause)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -3269,6 +3278,8 @@ export const OrchestrationV2Command = Schema.Union([
     /** Reject unless no message or run has landed on this thread. */
     expectedEmpty: Schema.optional(Schema.Boolean),
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
+    /** Null cancels the threshold stop's continuation. */
+    usagePause: Schema.optional(Schema.NullOr(OrchestrationV2UsagePause)),
     /** Link (object) or unlink (null) a pull request; absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   }),

@@ -64,6 +64,7 @@ import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
+import { UsageThresholdPauseRows } from "./UsageThresholdPauseSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { managedTelemetryOffMessage, usePrimaryManagedPolicy } from "../../state/managedPolicy";
 import {
@@ -512,6 +513,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze until limits reset"]
       : []),
+    ...(!Equal.equals(settings.usageThresholdPause, DEFAULT_UNIFIED_SETTINGS.usageThresholdPause)
+      ? ["Pause agents at a usage threshold"]
+      : []),
     ...(!Equal.equals(settings.snoozePresets, DEFAULT_UNIFIED_SETTINGS.snoozePresets)
       ? ["Snooze options"]
       : []),
@@ -682,6 +686,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      usageThresholdPause: DEFAULT_UNIFIED_SETTINGS.usageThresholdPause,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -1879,6 +1884,7 @@ export function ThreadsSettingsPanel() {
             />
           }
         />
+        <UsageThresholdPauseRows />
       </SettingsSection>
 
       {hasServerTargets ? (

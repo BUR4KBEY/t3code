@@ -460,6 +460,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset recover continue"],
   },
   {
+    id: "usage-threshold-pause",
+    title: "Pause agents at a usage threshold",
+    to: "/settings/threads",
+    searchTerms: ["usage quota rate limit remaining percent stop hold continue reset budget"],
+  },
+  {
     id: "working-shelf",
     title: msg("Working section"),
     to: "/settings/general",

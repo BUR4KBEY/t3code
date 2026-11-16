@@ -1034,3 +1034,46 @@ export function collectDriverUsageLimits(
   }
   return { createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)), accounts, notices };
 }
+
+/** The providers and accounts a usage threshold pause can watch, under the ids its settings store. */
+export function usageThresholdPauseChoices(
+  configs: Iterable<{
+    readonly providers: readonly ServerProvider[];
+    readonly usageLimitSources?: UsageLimitSourceSnapshots | undefined;
+  }>,
+) {
+  const accounts = new Map<string, { readonly driver: ServerProvider["driver"]; label: string }>();
+  for (const { providers, usageLimitSources: sources = [] } of configs) {
+    const drivers = new Set([
+      ...providers.map((provider) => provider.driver),
+      ...sources.flatMap((source) => source.accounts.map((account) => account.driver)),
+    ]);
+    for (const driver of drivers) {
+      // The report time is unused here, so a fixed clock keeps render pure.
+      for (const account of collectDriverUsageLimits(driver, providers, sources, 0)?.accounts ??
+        []) {
+        accounts.set(account.id, { driver: account.driver, label: account.label });
+      }
+    }
+  }
+  return {
+    drivers: [...new Set([...accounts.values()].map((account) => account.driver))],
+    accounts: [...accounts].map(([id, account]) => ({ id, ...account })),
+  };
+}
+
+/**
+ * Turns one option of a filter where empty means every option on or off. Null when that would
+ * leave nothing selected.
+ */
+export function toggleAllByDefaultFilter<T>(
+  selected: readonly T[],
+  options: readonly T[],
+  value: T,
+  on: boolean,
+): T[] | null {
+  const current = selected.length === 0 ? options : selected;
+  const next = on ? [...current, value] : current.filter((entry) => entry !== value);
+  if (next.length === 0) return null;
+  return options.every((option) => next.includes(option)) ? [] : next;
+}
