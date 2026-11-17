@@ -428,15 +428,19 @@ export function makeOmpBridgeHost(testHooks?: {
       return;
     }
     if (!bridge.connected) return;
+    // omp names a main agent after the session it first created, which a loaded or forked
+    // session replaces; the runtime's root session is the one T3 knows.
     if (message.t === "jobs") {
       if (!message.agent.id.startsWith(MAIN_AGENT_PREFIX)) return;
-      const sessionId = message.agent.id.slice(MAIN_AGENT_PREFIX.length);
+      const sessionId = yield* context.rootSessionId;
+      if (sessionId === null) return;
       return yield* publishJobs(context, state.jobs, sessionId, message);
     }
     // Cards exist only for direct children of the ACP session; deeper agents show in their parent's rows.
     const parentId = message.agent.parentId;
     if (message.agent.kind !== "sub" || parentId?.startsWith(MAIN_AGENT_PREFIX) !== true) return;
-    const sessionId = parentId.slice(MAIN_AGENT_PREFIX.length);
+    const sessionId = yield* context.rootSessionId;
+    if (sessionId === null) return;
     const childSessionId = `${CHILD_SESSION_PREFIX}${message.agent.id}`;
     if (message.t === "end") {
       state.liveChildren.delete(message.agent.id);

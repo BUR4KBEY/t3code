@@ -238,6 +238,8 @@ export interface AcpAdapterV2UserInputRequest {
 
 export interface AcpAdapterV2ExtensionContext {
   readonly runtime: AcpSessionRuntime.AcpSessionRuntime["Service"];
+  /** The root ACP session this runtime drives, once one is open. */
+  readonly rootSessionId: Effect.Effect<string | null>;
   readonly reportProviderRetry: (input: {
     readonly sessionId: string;
     readonly failure: OrchestrationV2ProviderFailure;
@@ -7237,6 +7239,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (flavor.registerExtensions !== undefined) {
             yield* flavor.registerExtensions({
               runtime: targetRuntime,
+              rootSessionId: Ref.get(activeSessionId),
               reportProviderRetry: (notice) =>
                 runRuntimeCallbackAtGeneration(handlerGeneration, reportProviderRetry(notice)).pipe(
                   Effect.asVoid,
