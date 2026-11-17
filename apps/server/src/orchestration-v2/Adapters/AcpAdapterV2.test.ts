@@ -4233,8 +4233,9 @@ describe("AcpAdapterV2", () => {
   describe("omp", () => {
     const encodeLine = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
     const decodeLine = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
-    const main = { id: "acp:mock-session-1", parentId: null, kind: "main" };
-    const alpha = { id: "Alpha", parentId: "acp:mock-session-1", kind: "sub" };
+    // A loaded session keeps the agent id of the session omp created first, not the ACP one.
+    const main = { id: "acp:omp-fresh-session", parentId: null, kind: "main" };
+    const alpha = { id: "Alpha", parentId: "acp:omp-fresh-session", kind: "sub" };
     const job = (id: string, type: string, label: string) => ({
       id,
       type,
