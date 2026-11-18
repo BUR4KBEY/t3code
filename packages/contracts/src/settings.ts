@@ -1353,6 +1353,9 @@ export type UsageThresholdPauseAggregation = typeof UsageThresholdPauseAggregati
 export const UsageThresholdPauseRemainingPercent = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 99 }),
 );
+export const UsageThresholdPauseMode = Schema.Literals(["rules", "script"]);
+export type UsageThresholdPauseMode = typeof UsageThresholdPauseMode.Type;
+export const UsageThresholdPauseScript = Schema.String.check(Schema.isMaxLength(20_000));
 /** Stops agents running when usage first drops below `remainingPercent`, and continues them at reset. */
 export const UsageThresholdPauseSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1371,6 +1374,9 @@ export const UsageThresholdPauseSettings = Schema.Struct({
   accountIds: Schema.Array(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** `script` replaces every rule above with the user's JavaScript decision. */
+  mode: UsageThresholdPauseMode.pipe(Schema.withDecodingDefault(Effect.succeed("rules" as const))),
+  script: UsageThresholdPauseScript.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type UsageThresholdPauseSettings = typeof UsageThresholdPauseSettings.Type;
 
@@ -1877,6 +1883,8 @@ export const ServerSettingsPatch = Schema.Struct({
       aggregation: Schema.optionalKey(UsageThresholdPauseAggregation),
       drivers: Schema.optionalKey(Schema.Array(ProviderDriverKind)),
       accountIds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+      mode: Schema.optionalKey(UsageThresholdPauseMode),
+      script: Schema.optionalKey(UsageThresholdPauseScript),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),

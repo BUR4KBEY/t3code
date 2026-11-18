@@ -641,6 +641,13 @@ export interface ProjectionStoreV2Shape {
       readonly threadId: ThreadId;
       readonly runId: RunId;
       readonly providerInstanceId: ProviderInstanceId;
+      readonly title: string;
+      readonly projectId: string;
+      readonly projectTitle: string | null;
+      readonly workspaceRoot: string | null;
+      readonly model: string | null;
+      readonly parentThreadId: string | null;
+      readonly startedAt: string;
     }>,
     ProjectionStoreV2Error
   >;
@@ -4830,11 +4837,27 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           readonly thread_id: string;
           readonly run_id: string;
           readonly provider_instance_id: string;
+          readonly title: string;
+          readonly project_id: string;
+          readonly project_title: string | null;
+          readonly workspace_root: string | null;
+          readonly model: string | null;
+          readonly parent_thread_id: string | null;
+          readonly started_at: string;
         }>`
           SELECT r.thread_id, r.run_id,
-            json_extract(r.payload_json, '$.providerInstanceId') AS provider_instance_id
+            json_extract(r.payload_json, '$.providerInstanceId') AS provider_instance_id,
+            t.title, t.project_id, p.title AS project_title, p.workspace_root,
+            json_extract(r.payload_json, '$.modelSelection.model') AS model,
+            json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
+            COALESCE(
+              json_extract(r.payload_json, '$.workStartedAt'),
+              json_extract(r.payload_json, '$.startedAt'),
+              json_extract(r.payload_json, '$.requestedAt')
+            ) AS started_at
           FROM orchestration_v2_projection_runs r
           INNER JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id
+          LEFT JOIN projection_projects p ON p.project_id = t.project_id
           WHERE r.status IN ('preparing', 'starting', 'running')
             AND t.deleted_at IS NULL
             AND t.archived_at IS NULL
@@ -4844,6 +4867,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           threadId: ThreadId.make(row.thread_id),
           runId: RunId.make(row.run_id),
           providerInstanceId: ProviderInstanceId.make(row.provider_instance_id),
+          title: row.title,
+          projectId: row.project_id,
+          projectTitle: row.project_title,
+          workspaceRoot: row.workspace_root,
+          model: row.model,
+          parentThreadId: row.parent_thread_id,
+          startedAt: row.started_at,
         }));
       },
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),

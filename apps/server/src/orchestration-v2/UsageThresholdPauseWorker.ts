@@ -2,7 +2,9 @@ import {
   CommandId,
   MessageId,
   type ProviderDriverKind,
+  type RunId,
   type ServerProvider,
+  type ThreadId,
   type UsageLimitsReport,
   type UsageThresholdPauseSettings,
 } from "@t3tools/contracts";
@@ -20,6 +22,7 @@ import * as UsageLimitSources from "../usage/UsageLimitSources.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
+import { runUsagePauseScript, scriptUsage, type ScriptUsageWindow } from "./usagePauseScript.ts";
 
 export interface UsageReading {
   readonly key: string;
@@ -117,6 +120,21 @@ export function resumeAtByDriver(
   return byDriver;
 }
 
+/** The reset of the provider's tightest window, which is what most likely made the script stop. */
+function defaultResumeAt(
+  usage: ReadonlyArray<ScriptUsageWindow>,
+  driver: ProviderDriverKind | undefined,
+): string | null {
+  let tightest: ScriptUsageWindow | undefined;
+  for (const window of usage) {
+    if (window.provider !== driver) continue;
+    if (tightest === undefined || window.remainingPercent < tightest.remainingPercent) {
+      tightest = window;
+    }
+  }
+  return tightest?.resetsAt ?? null;
+}
+
 const makeSweep = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
@@ -125,6 +143,7 @@ const makeSweep = Effect.gen(function* () {
   const registry = yield* ProviderRegistry.ProviderRegistry;
   const hubs = yield* UsageLimitSources.UsageLimitSources;
   const armed = new Map<string, boolean>();
+  let script = { source: "", stateJson: "{}", lastError: null as string | null };
   const due = DueHint.make();
   yield* forkParked(
     Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
@@ -143,6 +162,28 @@ const makeSweep = Effect.gen(function* () {
       ),
     );
 
+  const stopRun = Effect.fn("UsageThresholdPauseWorker.stopRun")(function* (
+    run: { readonly threadId: ThreadId; readonly runId: RunId },
+    resumeAt: string | null,
+    reason: string,
+  ) {
+    // Recorded first, so a stop that lands without its record never strands the thread.
+    yield* dispatchLogged("pause", {
+      type: "thread.metadata.update",
+      commandId: CommandId.make(`usage-threshold-pause:${run.runId}`),
+      threadId: run.threadId,
+      usagePause: { runId: run.runId, resumeAt },
+    });
+    yield* dispatchLogged("stop", {
+      type: "thread.stop",
+      commandId: CommandId.make(`usage-threshold-stop:${run.runId}`),
+      threadId: run.threadId,
+      reason,
+      // Every live run is listed, delegated children included, so each gets its own record.
+      stopDelegatedTasks: false,
+    });
+  });
+
   const stopCrossed = Effect.fn("UsageThresholdPauseWorker.stopCrossed")(function* (
     providers: ReadonlyArray<ServerProvider>,
     crossings: ReadonlyArray<UsageReading>,
@@ -154,21 +195,70 @@ const makeSweep = Effect.gen(function* () {
       const driver = driverOf.get(run.providerInstanceId);
       const crossing = driver === undefined ? undefined : byDriver.get(driver);
       if (crossing === undefined) continue;
-      // Recorded first, so a stop that lands without its record never strands the thread.
-      yield* dispatchLogged("pause", {
-        type: "thread.metadata.update",
-        commandId: CommandId.make(`usage-threshold-pause:${run.runId}`),
-        threadId: run.threadId,
-        usagePause: { runId: run.runId, resumeAt: crossing.resumeAt },
-      });
-      yield* dispatchLogged("stop", {
-        type: "thread.stop",
-        commandId: CommandId.make(`usage-threshold-stop:${run.runId}`),
-        threadId: run.threadId,
-        reason: `Paused at ${Math.round(crossing.remainingPercent)}% ${crossing.label} usage left (threshold ${threshold}%). ${crossing.resumeAt === null ? "No reset time is known, so continue it yourself." : "Continues when the limit resets."}`,
-        // Every live run is listed, delegated children included, so each gets its own record.
-        stopDelegatedTasks: false,
-      });
+      yield* stopRun(
+        run,
+        crossing.resumeAt,
+        `Paused at ${Math.round(crossing.remainingPercent)}% ${crossing.label} usage left (threshold ${threshold}%). ${crossing.resumeAt === null ? "No reset time is known, so continue it yourself." : "Continues when the limit resets."}`,
+      );
+    }
+  });
+
+  const runScript = Effect.fn("UsageThresholdPauseWorker.runScript")(function* (
+    source: string,
+    providers: ReadonlyArray<ServerProvider>,
+    reports: ReadonlyArray<UsageLimitsReport>,
+    nowMs: number,
+  ) {
+    if (script.source !== source) script = { source, stateJson: "{}", lastError: null };
+    if (source.trim() === "") return;
+    const usage = scriptUsage(reports);
+    const driverOf = new Map(providers.map((provider) => [provider.instanceId, provider.driver]));
+    const liveRuns = yield* projections.listLiveRuns();
+    const runs = liveRuns.map((run) => ({
+      runId: run.runId,
+      threadId: run.threadId,
+      title: run.title,
+      projectId: run.projectId,
+      project: run.projectTitle,
+      workspaceRoot: run.workspaceRoot,
+      provider: driverOf.get(run.providerInstanceId) ?? null,
+      providerInstanceId: run.providerInstanceId,
+      model: run.model,
+      delegated: run.parentThreadId !== null,
+      parentThreadId: run.parentThreadId,
+      startedAt: run.startedAt,
+      runningMinutes: Math.max(0, (nowMs - Date.parse(run.startedAt)) / 60_000),
+    }));
+    const decided = yield* Effect.try({
+      try: () => runUsagePauseScript(source, { usage, runs, nowMs }, script.stateJson),
+      catch: (error) => (error instanceof Error ? error.message : String(error)),
+    }).pipe(
+      Effect.tapError((message) =>
+        // Logged once per distinct failure: the script runs every tick.
+        message === script.lastError
+          ? Effect.void
+          : Effect.logWarning("orchestration-v2.usage-threshold.script-failed", { message }),
+      ),
+      Effect.tapError((message) => Effect.sync(() => (script.lastError = message))),
+      Effect.option,
+    );
+    if (decided._tag === "None") return;
+    const { stateJson, stops } = decided.value;
+    script.stateJson = stateJson;
+    script.lastError = null;
+    const byRunId = new Map(liveRuns.map((run) => [run.runId as string, run]));
+    for (const stop of stops) {
+      const run = byRunId.get(stop.runId);
+      if (run === undefined) continue;
+      const resumeAt =
+        stop.resumeAt === undefined
+          ? defaultResumeAt(usage, driverOf.get(run.providerInstanceId))
+          : stop.resumeAt;
+      yield* stopRun(
+        run,
+        resumeAt,
+        `${stop.message ?? "Paused by your usage pause script."} ${resumeAt === null ? "Continue it yourself." : "Continues automatically."}`,
+      );
     }
   });
 
@@ -229,12 +319,18 @@ const makeSweep = Effect.gen(function* () {
       const reports = [...drivers].flatMap(
         (driver) => collectDriverUsageLimits(driver, providers, sources, nowMs) ?? [],
       );
-      const crossings = thresholdCrossings(
-        usageReadings(config, reports),
-        config.remainingPercent,
-        armed,
-      );
-      if (crossings.length > 0) yield* stopCrossed(providers, crossings, config.remainingPercent);
+      if (config.mode === "script") {
+        // Rules re-arm from scratch when switched back, as when the setting is turned on.
+        armed.clear();
+        yield* runScript(config.script, providers, reports, nowMs);
+      } else {
+        const crossings = thresholdCrossings(
+          usageReadings(config, reports),
+          config.remainingPercent,
+          armed,
+        );
+        if (crossings.length > 0) yield* stopCrossed(providers, crossings, config.remainingPercent);
+      }
     }
     yield* resumeDue(nowMs);
   });

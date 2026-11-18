@@ -1,9 +1,13 @@
 import { useAtomValue } from "@effect/atom-react";
 import { PROVIDER_DISPLAY_NAMES, type ServerProviderUsageWindow } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { toggleAllByDefaultFilter, usageThresholdPauseChoices } from "@t3tools/shared/usageLimits";
+import {
+  toggleAllByDefaultFilter,
+  USAGE_PAUSE_SCRIPT_EXAMPLE,
+  usageThresholdPauseChoices,
+} from "@t3tools/shared/usageLimits";
 import * as Equal from "effect/Equal";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { environmentPresentations } from "../../state/presentation";
 import { Menu, MenuCheckboxItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -22,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
@@ -151,6 +156,7 @@ export function UsageThresholdPauseRows() {
       (environment) => presentations.get(environment.environmentId)?.serverConfig ?? [],
     ),
   );
+  const scriptEdited = useRef(false);
   const update = (patch: {
     enabled?: boolean;
     remainingPercent?: number;
@@ -158,6 +164,8 @@ export function UsageThresholdPauseRows() {
     aggregation?: keyof typeof AGGREGATION_LABELS;
     drivers?: (typeof choices.drivers)[number][];
     accountIds?: string[];
+    mode?: "rules" | "script";
+    script?: string;
   }) => updateSettings({ usageThresholdPause: patch });
 
   return (
@@ -189,6 +197,61 @@ export function UsageThresholdPauseRows() {
         }
       />
       {pause.enabled ? (
+        <SettingsRow
+          serverScoped
+          settingKeys={SETTING_KEYS}
+          title="Decide with"
+          description="Use the settings below, or your own script that sees every usage window and running agent and picks which to stop."
+          control={
+            <ToggleGroup
+              variant="outline"
+              size="sm"
+              aria-label="Decide with"
+              value={[pause.mode]}
+              onValueChange={([mode]) => {
+                if (mode !== "rules" && mode !== "script") return;
+                update(
+                  mode === "script" && pause.script.trim() === ""
+                    ? { mode, script: USAGE_PAUSE_SCRIPT_EXAMPLE }
+                    : { mode },
+                );
+              }}
+            >
+              <Toggle value="rules">Settings</Toggle>
+              <Toggle value="script">Script</Toggle>
+            </ToggleGroup>
+          }
+        />
+      ) : null}
+      {pause.enabled && pause.mode === "script" ? (
+        <SettingsRow
+          serverScoped
+          settingKeys={SETTING_KEYS}
+          title="Script"
+          description="JavaScript function body, run on the server. Saved when you leave the field. Errors are written to the server log and stop nothing."
+        >
+          <div className="mt-3 pb-3.5">
+            <Textarea
+              key={pause.script}
+              aria-label="Usage pause script"
+              spellCheck={false}
+              autoCapitalize="none"
+              rows={14}
+              maxLength={20_000}
+              defaultValue={pause.script}
+              onChange={() => {
+                scriptEdited.current = true;
+              }}
+              onBlur={(event) => {
+                const script = event.target.value;
+                if (scriptEdited.current && script !== pause.script) update({ script });
+                scriptEdited.current = false;
+              }}
+            />
+          </div>
+        </SettingsRow>
+      ) : null}
+      {pause.enabled && pause.mode === "rules" ? (
         <>
           <SettingsRow
             serverScoped

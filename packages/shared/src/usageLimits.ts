@@ -1035,6 +1035,27 @@ export function collectDriverUsageLimits(
   return { createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)), accounts, notices };
 }
 
+/** Filled in when the usage pause first switches to a script, so users start from working code. */
+export const USAGE_PAUSE_SCRIPT_EXAMPLE = `// Runs on the server every few seconds while enabled.
+// usage: [{ provider, accountId, account, kind, window, windowId, remainingPercent, usedPercent, resetsAt }]
+//   kind is "session", "weekly", "monthly" or "other"; one entry per account window.
+// runs: [{ runId, threadId, title, projectId, project, workspaceRoot, provider, providerInstanceId,
+//   model, delegated, parentThreadId, startedAt, runningMinutes }], the agents running now.
+// now: a Date. state: an object kept between runs until the server restarts or the script changes.
+// Return the runs to stop. Return { runId, resumeAt, message } to set when it continues
+// (a time, or null for never) and the stop message. Default: the provider's tightest window reset.
+
+// Example: stop each thread once when its provider's weekly window is down to 20%, not on weekends.
+const weekend = now.getDay() === 0 || now.getDay() === 6;
+const low = usage.filter((w) => w.kind === "weekly" && w.remainingPercent <= 20);
+return runs.filter((run) => {
+  if (weekend || !low.some((w) => w.provider === run.provider)) return false;
+  if (state[run.threadId]) return false; // a thread you continue by hand keeps running
+  state[run.threadId] = true;
+  return true;
+});
+`;
+
 /** The providers and accounts a usage threshold pause can watch, under the ids its settings store. */
 export function usageThresholdPauseChoices(
   configs: Iterable<{
