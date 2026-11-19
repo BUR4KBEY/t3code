@@ -288,6 +288,13 @@ it; use `state` to remember what you already stopped. The script runs on the
 server with no file or network access and a short time limit. Errors stop
 nothing and are written to the server log.
 
+For CLIProxyAPI accounts, `usage` also carries each account's routing
+`priority`, and the script can call `setPriority(accountId, n)` to change it
+(higher is preferred), for example to move traffic to a second subscription
+before the first runs out instead of stopping agents. Usage is re-read on the
+provider refresh interval; call `checkAgainIn(seconds)` near a threshold to
+re-read sooner, at most once every 75 seconds.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to

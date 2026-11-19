@@ -46,6 +46,7 @@ const AuthFile = Schema.Struct({
   email: Schema.optional(Schema.String),
   disabled: Schema.optional(Schema.Boolean),
   project_id: Schema.optional(Schema.String),
+  priority: Schema.optional(Schema.Number),
   id_token: Schema.optional(
     Schema.Struct({
       chatgpt_account_id: Schema.optional(Schema.String),
@@ -408,6 +409,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
     hub: CliproxyHub,
     path: string,
     body?: unknown,
+    method: "POST" | "PATCH" = "POST",
   ) {
     const url = yield* Effect.try({
       try: () => {
@@ -419,7 +421,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
       catch: () => new UsageLimitSourceError({ detail: "The hub URL is not valid." }),
     });
     const request = (
-      body === undefined ? HttpClientRequest.get(url) : HttpClientRequest.post(url)
+      body === undefined
+        ? HttpClientRequest.get(url)
+        : method === "PATCH"
+          ? HttpClientRequest.patch(url)
+          : HttpClientRequest.post(url)
     ).pipe(HttpClientRequest.setHeader("Authorization", `Bearer ${hub.managementKey}`));
     const response = yield* client
       .execute(body === undefined ? request : request.pipe(HttpClientRequest.bodyJsonUnsafe(body)))
@@ -481,7 +487,12 @@ export const makeCliproxyApi = Effect.gen(function* () {
         }),
       })),
     );
-    return { id: account.id, driver: provider.driver, ...reading };
+    return {
+      id: account.id,
+      driver: provider.driver,
+      ...reading,
+      priority: Math.trunc(account.priority ?? 0),
+    };
   });
 
   const readAccounts = Effect.fn("CliproxyApi.readAccounts")(function* (
@@ -562,5 +573,13 @@ export const makeCliproxyApi = Effect.gen(function* () {
       ),
     );
   });
-  return { readAccounts, consume };
+  /** Sets the account's routing priority; the hub prefers higher values. */
+  const setPriority = Effect.fn("CliproxyApi.setPriority")(function* (
+    hub: CliproxyHub,
+    accountId: string,
+    priority: number,
+  ) {
+    yield* management(hub, "auth-files/fields", { name: accountId, priority }, "PATCH");
+  });
+  return { readAccounts, consume, setPriority };
 });

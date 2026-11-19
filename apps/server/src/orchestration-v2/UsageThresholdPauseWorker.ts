@@ -5,6 +5,7 @@ import {
   type RunId,
   type ServerProvider,
   type ThreadId,
+  type UsageLimitSourceSnapshot,
   type UsageLimitsReport,
   type UsageThresholdPauseSettings,
 } from "@t3tools/contracts";
@@ -22,7 +23,15 @@ import * as UsageLimitSources from "../usage/UsageLimitSources.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
-import { runUsagePauseScript, scriptUsage, type ScriptUsageWindow } from "./usagePauseScript.ts";
+import {
+  hubAccountKey,
+  runUsagePauseScript,
+  scriptUsage,
+  type ScriptUsageWindow,
+} from "./usagePauseScript.ts";
+
+/** Floor between hub re-reads a script asks for; the usage endpoint answers 429 when hit often. */
+const HUB_READ_FLOOR_MS = 75_000;
 
 export interface UsageReading {
   readonly key: string;
@@ -144,6 +153,10 @@ const makeSweep = Effect.gen(function* () {
   const hubs = yield* UsageLimitSources.UsageLimitSources;
   const armed = new Map<string, boolean>();
   let script = { source: "", stateJson: "{}", lastError: null as string | null };
+  let lastHubReadMs = -Infinity;
+  // Requested account=priority → when last tried, so a failing PATCH is not retried every tick.
+  const priorityAttempts = new Map<string, number>();
+  const warnedAccounts = new Set<string>();
   const due = DueHint.make();
   yield* forkParked(
     Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
@@ -203,15 +216,60 @@ const makeSweep = Effect.gen(function* () {
     }
   });
 
+  const applyPriorities = Effect.fn("UsageThresholdPauseWorker.applyPriorities")(function* (
+    requested: ReadonlyArray<{ readonly accountId: string; readonly priority: number }>,
+    sources: ReadonlyArray<UsageLimitSourceSnapshot>,
+    nowMs: number,
+  ) {
+    for (const [key, at] of priorityAttempts) {
+      if (nowMs - at >= HUB_READ_FLOOR_MS) priorityAttempts.delete(key);
+    }
+    const accounts = new Map(
+      sources.flatMap((source) =>
+        source.accounts.map((account) => [
+          hubAccountKey(source.id, account.id),
+          { sourceId: source.id, accountId: account.id, priority: account.priority ?? 0 },
+        ]),
+      ),
+    );
+    for (const { accountId, priority } of requested) {
+      const target = accounts.get(accountId);
+      if (target === undefined) {
+        if (!warnedAccounts.has(accountId)) {
+          warnedAccounts.add(accountId);
+          yield* Effect.logWarning("orchestration-v2.usage-threshold.priority-unknown-account", {
+            accountId,
+          });
+        }
+        continue;
+      }
+      const attempt = `${accountId}=${priority}`;
+      if (target.priority === priority || priorityAttempts.has(attempt)) continue;
+      priorityAttempts.set(attempt, nowMs);
+      yield* hubs.setPriority({ ...target, priority }).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("orchestration-v2.usage-threshold.priority-set", { accountId, priority }),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("orchestration-v2.usage-threshold.priority-failed", {
+            accountId,
+            cause,
+          }),
+        ),
+      );
+    }
+  });
+
   const runScript = Effect.fn("UsageThresholdPauseWorker.runScript")(function* (
     source: string,
     providers: ReadonlyArray<ServerProvider>,
+    sources: ReadonlyArray<UsageLimitSourceSnapshot>,
     reports: ReadonlyArray<UsageLimitsReport>,
     nowMs: number,
   ) {
     if (script.source !== source) script = { source, stateJson: "{}", lastError: null };
     if (source.trim() === "") return;
-    const usage = scriptUsage(reports);
+    const usage = scriptUsage(reports, sources);
     const driverOf = new Map(providers.map((provider) => [provider.instanceId, provider.driver]));
     const liveRuns = yield* projections.listLiveRuns();
     const runs = liveRuns.map((run) => ({
@@ -243,7 +301,7 @@ const makeSweep = Effect.gen(function* () {
       Effect.option,
     );
     if (decided._tag === "None") return;
-    const { stateJson, stops } = decided.value;
+    const { stateJson, stops, priorities, checkAgainInSeconds } = decided.value;
     script.stateJson = stateJson;
     script.lastError = null;
     const byRunId = new Map(liveRuns.map((run) => [run.runId as string, run]));
@@ -259,6 +317,14 @@ const makeSweep = Effect.gen(function* () {
         resumeAt,
         `${stop.message ?? "Paused by your usage pause script."} ${resumeAt === null ? "Continue it yourself." : "Continues automatically."}`,
       );
+    }
+    yield* applyPriorities(priorities, sources, nowMs);
+    if (
+      checkAgainInSeconds !== null &&
+      nowMs - lastHubReadMs >= Math.max(HUB_READ_FLOOR_MS, checkAgainInSeconds * 1000)
+    ) {
+      lastHubReadMs = nowMs;
+      yield* hubs.refresh;
     }
   });
 
@@ -322,7 +388,7 @@ const makeSweep = Effect.gen(function* () {
       if (config.mode === "script") {
         // Rules re-arm from scratch when switched back, as when the setting is turned on.
         armed.clear();
-        yield* runScript(config.script, providers, reports, nowMs);
+        yield* runScript(config.script, providers, sources, reports, nowMs);
       } else {
         const crossings = thresholdCrossings(
           usageReadings(config, reports),

@@ -1,4 +1,4 @@
-import type { UsageLimitsReport } from "@t3tools/contracts";
+import type { UsageLimitSourceSnapshot, UsageLimitsReport } from "@t3tools/contracts";
 import { limitsNotice } from "@t3tools/shared/usageLimits";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -15,6 +15,8 @@ export interface ScriptUsageWindow {
   readonly remainingPercent: number;
   readonly usedPercent: number;
   readonly resetsAt: string | null;
+  /** CLIProxyAPI routing priority, or null when the account is not on a hub. */
+  readonly priority: number | null;
 }
 
 export interface ScriptRun {
@@ -40,8 +42,17 @@ interface ScriptStop {
   readonly message?: string;
 }
 
+interface ScriptPriority {
+  readonly accountId: string;
+  readonly priority: number;
+}
+
 interface ScriptDecision {
   readonly stops: ReadonlyArray<ScriptStop>;
+  /** Last `setPriority` call per account. */
+  readonly priorities: ReadonlyArray<ScriptPriority>;
+  /** Shortest `checkAgainIn` the script asked for, in seconds. */
+  readonly checkAgainInSeconds: number | null;
   /** JSON of the script's `state`, handed back on the next tick. */
   readonly stateJson: string;
 }
@@ -58,14 +69,30 @@ const ScriptOutput = Schema.Union([
         message: Schema.optional(Schema.String),
       }),
     ),
+    priorities: Schema.Array(Schema.Struct({ accountId: Schema.String, priority: Schema.Int })),
+    checkAgainInSeconds: Schema.NullOr(Schema.Finite),
     state: Schema.String,
   }),
 ]);
 const decodeOutput = Schema.decodeUnknownSync(Schema.fromJsonString(ScriptOutput));
 
+/** Hub accounts appear in usage reports as `<source id>:<hub account id>`. */
+export function hubAccountKey(sourceId: string, accountId: string): string {
+  return `${sourceId}:${accountId}`;
+}
+
 export function scriptUsage(
   reports: ReadonlyArray<UsageLimitsReport>,
+  sources: ReadonlyArray<UsageLimitSourceSnapshot>,
 ): ReadonlyArray<ScriptUsageWindow> {
+  const priorities = new Map(
+    sources.flatMap((source) =>
+      source.accounts.map((account) => [
+        hubAccountKey(source.id, account.id),
+        account.priority ?? 0,
+      ]),
+    ),
+  );
   return reports.flatMap((report) =>
     report.accounts.flatMap((account) =>
       limitsNotice(account.limits) !== null
@@ -82,6 +109,7 @@ export function scriptUsage(
               remainingPercent: 100 - used,
               usedPercent: used,
               resetsAt: window.resetsAt ?? null,
+              priority: priorities.get(account.id) ?? null,
             };
           }),
     ),
@@ -93,6 +121,13 @@ export function scriptUsage(
 const HARNESS_HEAD = `(() => { "use strict"; try {
 const __in = JSON.parse(__input);
 const __state = JSON.parse(__stateJson);
+const __priorities = new Map();
+let __checkAgainIn = null;
+const setPriority = (accountId, priority) => { __priorities.set(String(accountId), priority); };
+const checkAgainIn = (seconds) => {
+  if (typeof seconds === "number" && Number.isFinite(seconds))
+    __checkAgainIn = __checkAgainIn === null ? seconds : Math.min(__checkAgainIn, seconds);
+};
 const __out = (function (usage, runs, now, state) {
 `;
 const HARNESS_TAIL = `
@@ -104,6 +139,8 @@ return JSON.stringify({
     resumeAt: stop.resumeAt instanceof Date ? stop.resumeAt.getTime() : stop.resumeAt,
     message: stop.message,
   }),
+  priorities: [...__priorities].map(([accountId, priority]) => ({ accountId, priority })),
+  checkAgainInSeconds: __checkAgainIn,
   state: JSON.stringify(__state),
 });
 } catch (error) {
@@ -125,8 +162,9 @@ function compile(script: string): NodeVM.Script {
 }
 
 /**
- * Runs the user's script body with `usage`, `runs`, `now` and `state` in scope. It returns the
- * runs to stop; `state` is any JSON the script keeps between ticks. Throws on any script error.
+ * Runs the user's script body with `usage`, `runs`, `now` and `state` in scope, plus
+ * `setPriority(accountId, priority)` and `checkAgainIn(seconds)`. It returns the runs to stop;
+ * `state` is any JSON the script keeps between ticks. Throws on any script error.
  */
 export function runUsagePauseScript(
   script: string,
@@ -147,6 +185,8 @@ export function runUsagePauseScript(
   if ("error" in output) throw new Error(output.error);
   return {
     stateJson: output.state,
+    priorities: output.priorities,
+    checkAgainInSeconds: output.checkAgainInSeconds,
     stops: output.stops.map(({ runId, resumeAt, message }) => ({
       runId,
       ...(resumeAt === undefined ? {} : { resumeAt: normalizeResumeAt(resumeAt) }),

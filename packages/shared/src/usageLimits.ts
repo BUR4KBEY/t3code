@@ -1037,11 +1037,15 @@ export function collectDriverUsageLimits(
 
 /** Filled in when the usage pause first switches to a script, so users start from working code. */
 export const USAGE_PAUSE_SCRIPT_EXAMPLE = `// Runs on the server every few seconds while enabled.
-// usage: [{ provider, accountId, account, kind, window, windowId, remainingPercent, usedPercent, resetsAt }]
-//   kind is "session", "weekly", "monthly" or "other"; one entry per account window.
+// usage: [{ provider, accountId, account, kind, window, windowId, remainingPercent, usedPercent,
+//   resetsAt, priority }], one entry per account window. kind is "session", "weekly", "monthly"
+//   or "other". priority is the CLIProxyAPI routing priority, or null off a hub.
 // runs: [{ runId, threadId, title, projectId, project, workspaceRoot, provider, providerInstanceId,
 //   model, delegated, parentThreadId, startedAt, runningMinutes }], the agents running now.
 // now: a Date. state: an object kept between runs until the server restarts or the script changes.
+// setPriority(accountId, n): set a CLIProxyAPI account's priority (higher is preferred).
+// checkAgainIn(seconds): re-read hub usage that soon, at most every 75 s; otherwise the
+//   provider refresh interval applies.
 // Return the runs to stop. Return { runId, resumeAt, message } to set when it continues
 // (a time, or null for never) and the stop message. Default: the provider's tightest window reset.
 

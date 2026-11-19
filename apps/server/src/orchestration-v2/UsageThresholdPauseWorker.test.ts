@@ -189,6 +189,7 @@ describe("runUsagePauseScript", () => {
         remainingPercent: 10,
         usedPercent: 90,
         resetsAt: "2026-11-20T00:00:00.000Z",
+        priority: 2,
       },
     ],
     runs: [run("one", "claudeAgent"), run("two", "codex")],
@@ -208,6 +209,24 @@ describe("runUsagePauseScript", () => {
     const second = runUsagePauseScript(script, input, first.stateJson);
     assert.deepEqual(second.stops, [{ runId: "one", resumeAt: null }]);
     assert.deepEqual(JSON.parse(second.stateJson), { calls: 2 });
+  });
+
+  it("reports the last priority per account and the shortest re-check", () => {
+    const decided = runUsagePauseScript(
+      `setPriority("a", 2); setPriority("a", 0); setPriority("b", 1);
+       checkAgainIn(120); checkAgainIn(75); checkAgainIn("soon");`,
+      input,
+      "{}",
+    );
+    assert.deepEqual(decided.priorities, [
+      { accountId: "a", priority: 0 },
+      { accountId: "b", priority: 1 },
+    ]);
+    assert.equal(decided.checkAgainInSeconds, 75);
+    assert.throws(
+      () => runUsagePauseScript(`setPriority("a", 1.5)`, input, "{}"),
+      "Expected an integer",
+    );
   });
 
   it("fails on errors, endless loops, bad results and eval", () => {
