@@ -9,14 +9,18 @@ import { AutoSettleDaysField } from "./components/AutoSettleDaysField";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
-import type { ComponentProps } from "react";
+import { useEffect, useEffectEvent, useRef, type ComponentProps } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DEFAULT_SERVER_SETTINGS, PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
-import { toggleAllByDefaultFilter, usageThresholdPauseChoices } from "@t3tools/shared/usageLimits";
+import {
+  toggleAllByDefaultFilter,
+  USAGE_PAUSE_SCRIPT_EXAMPLE,
+  usageThresholdPauseChoices,
+} from "@t3tools/shared/usageLimits";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
-import { AppText as Text } from "../../components/ui/AppText";
+import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
 import { NumberField } from "../../components/ui/NumberField";
 import { useEnvironments } from "../../state/environments";
@@ -87,6 +91,60 @@ const USAGE_PAUSE_AGGREGATIONS = [
     description: "Pause when any one account reaches the threshold.",
   },
 ] as const;
+
+const USAGE_PAUSE_MODES = [
+  {
+    value: "rules",
+    label: "Use settings",
+    description: "Pause at the remaining amount, windows, and accounts set here.",
+  },
+  {
+    value: "script",
+    label: "Use a script",
+    description:
+      "Your JavaScript sees every usage window and running agent and picks which to stop.",
+  },
+] as const;
+
+function UsagePauseScriptField(props: {
+  readonly script: string;
+  readonly disabled: boolean;
+  readonly onSave: (script: string) => void;
+}) {
+  const draft = useRef<string | null>(null);
+  const save = () => {
+    const text = draft.current;
+    draft.current = null;
+    if (text !== null && text !== props.script) props.onSave(text);
+  };
+  // Android Back hides the keyboard without ending editing, so leaving the screen saves too.
+  const saveOnExit = useEffectEvent(save);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saves an unsent script draft to server settings when the field unmounts
+  useEffect(() => () => saveOnExit(), []);
+  return (
+    <View className="gap-2 px-4 py-3">
+      <Text className="text-sm text-foreground-muted">
+        JavaScript function body, run on the server. Errors are written to the server log and stop
+        nothing.
+      </Text>
+      <AppTextInput
+        key={props.script}
+        accessibilityLabel="Usage pause script"
+        defaultValue={props.script}
+        onChangeText={(text) => {
+          draft.current = text;
+        }}
+        editable={!props.disabled}
+        multiline
+        autoCapitalize="none"
+        autoCorrect={false}
+        spellCheck={false}
+        className="min-h-60 rounded-xl px-3 py-2 font-mono text-sm text-foreground"
+        onEndEditing={save}
+      />
+    </View>
+  );
+}
 
 /**
  * Usage-limit and auto-settle rows. The Threads page owns their writes, so they share its queue
@@ -212,7 +270,33 @@ export function AutoSettleSettingsRows(props: {
             disabled={pauseDisabled}
             onValueChange={(enabled) => writePause({ enabled })}
           />
-          {pause.enabled ? (
+          {pause.enabled
+            ? USAGE_PAUSE_MODES.map((choice) => (
+                <ListChoiceRow
+                  key={choice.value}
+                  label={choice.label}
+                  description={choice.description}
+                  selected={pause.mode === choice.value}
+                  separated
+                  disabled={pauseDisabled}
+                  onPress={() =>
+                    writePause(
+                      choice.value === "script" && pause.script.trim() === ""
+                        ? { mode: "script", script: USAGE_PAUSE_SCRIPT_EXAMPLE }
+                        : { mode: choice.value },
+                    )
+                  }
+                />
+              ))
+            : null}
+          {pause.enabled && pause.mode === "script" ? (
+            <UsagePauseScriptField
+              script={pause.script}
+              disabled={pauseDisabled}
+              onSave={(script) => writePause({ script })}
+            />
+          ) : null}
+          {pause.enabled && pause.mode === "rules" ? (
             <View className="flex-row items-center gap-4 px-4 py-4 android:min-h-14 android:py-3">
               <View className="w-[22px] android:w-6" />
               <Text className="flex-1 text-foreground text-lg android:text-base">
@@ -231,7 +315,7 @@ export function AutoSettleSettingsRows(props: {
           ) : null}
         </SettingsSection>
       ) : null}
-      {!projectSelected && pause.enabled ? (
+      {!projectSelected && pause.enabled && pause.mode === "rules" ? (
         <SettingsSection title="Usage threshold">
           {USAGE_WINDOW_KINDS.map(({ kind, label }) => {
             const on = pause.windowKinds.includes(kind);
@@ -271,7 +355,7 @@ export function AutoSettleSettingsRows(props: {
           ))}
         </SettingsSection>
       ) : null}
-      {!projectSelected && pause.enabled
+      {!projectSelected && pause.enabled && pause.mode === "rules"
         ? pauseFilters.map((filter) =>
             filter.options.length === 0 ? null : (
               <SettingsSection key={filter.title} title={filter.title}>

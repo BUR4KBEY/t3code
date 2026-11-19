@@ -55,6 +55,7 @@ function fixture(
       provider: string;
       email?: string;
       disabled?: boolean;
+      priority?: number;
       project_id?: string;
       id_token?: { chatgpt_account_id: string; plan_type?: string; chatgpt_plan_type?: string };
     }>;
@@ -63,10 +64,17 @@ function fixture(
   } = {},
 ) {
   const requests: Array<{ path: string; body?: RequestBody }> = [];
+  const patches: Array<{ method: string; path: string; body: unknown }> = [];
   const http = HttpClient.make((request) =>
     Effect.sync(() => {
       expect(request.headers.authorization).toBe("Bearer management-secret");
       const path = new URL(request.url).pathname;
+      if (path.endsWith("/auth-files/fields")) {
+        const text =
+          request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
+        patches.push({ method: request.method, path, body: JSON.parse(text) });
+        return HttpClientResponse.fromWeb(request, Response.json({ status: "ok" }));
+      }
       const body =
         request.body._tag === "Uint8Array"
           ? decodeRequest(new TextDecoder().decode(request.body.body))
@@ -116,6 +124,7 @@ function fixture(
   );
   return {
     requests,
+    patches,
     api: makeCliproxyApi.pipe(
       Effect.provideService(HttpClient.HttpClient, http),
       Effect.provide(NodeCrypto.layer),
@@ -682,6 +691,22 @@ describe("CLIProxyAPI built-in management API", () => {
         "Failure",
       );
       expect(test.requests.every((request) => request.path.endsWith("/auth-files"))).toBe(true);
+    }),
+  );
+
+  it.effect("reads routing priority and sets it through the fields endpoint", () =>
+    Effect.gen(function* () {
+      const test = fixture({ accounts: [{ ...accounts[0]!, priority: 5 }, accounts[1]!] });
+      const api = yield* test.api;
+      expect((yield* api.readAccounts(config)).map((account) => account.priority)).toEqual([5, 0]);
+      yield* api.setPriority(config, "second.json", 7);
+      expect(test.patches).toEqual([
+        {
+          method: "PATCH",
+          path: "/v0/management/auth-files/fields",
+          body: { name: "second.json", priority: 7 },
+        },
+      ]);
     }),
   );
 

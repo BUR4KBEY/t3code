@@ -39,6 +39,12 @@ export class UsageLimitSources extends Context.Service<
     readonly consumeResetCredit: (
       input: UsageLimitSourceConsumeResetCreditInput,
     ) => Effect.Effect<ProviderConsumeResetCreditResult, UsageLimitSourceError>;
+    /** Sets a hub account's routing priority, then re-reads that hub. */
+    readonly setPriority: (input: {
+      readonly sourceId: UsageLimitSourceId;
+      readonly accountId: string;
+      readonly priority: number;
+    }) => Effect.Effect<void, UsageLimitSourceError>;
   }
 >()("t3/usage/UsageLimitSources") {}
 
@@ -134,14 +140,11 @@ export const make = Effect.gen(function* () {
     yield* publish(snapshots);
   }).pipe(refreshLock.withPermits(1), Effect.ignoreCause({ log: true }));
 
-  // Shares the refresh lock so a stale in-flight read cannot overwrite a redemption.
-  const consumeResetCredit = Effect.fn("UsageLimitSources.consumeResetCredit")(function* (
-    input: UsageLimitSourceConsumeResetCreditInput,
-  ) {
+  const hubFor = Effect.fn("UsageLimitSources.hubFor")(function* (sourceId: UsageLimitSourceId) {
     const settings = yield* settingsService.getSettings.pipe(
       Effect.mapError(() => new UsageLimitSourceError({ detail: "Could not read hub settings." })),
     );
-    const config = settings.usageLimitSources[input.sourceId];
+    const config = settings.usageLimitSources[sourceId];
     if (!config?.enabled) {
       return yield* new UsageLimitSourceError({
         detail: "The usage limit source is missing or disabled.",
@@ -151,15 +154,36 @@ export const make = Effect.gen(function* () {
     if (managementKey.length === 0) {
       return yield* new UsageLimitSourceError({ detail: missingManagementKey(config) });
     }
-    const result = yield* api.consume(
-      { url: config.url, managementKey },
-      input.accountId,
-      input.creditId,
-    );
-    const snapshot = yield* readSource(input.sourceId, config);
+    return { config, hub: { url: config.url, managementKey } };
+  });
+
+  const republish = Effect.fn("UsageLimitSources.republish")(function* (
+    sourceId: UsageLimitSourceId,
+    config: UsageLimitSourceConfig,
+  ) {
+    const snapshot = yield* readSource(sourceId, config);
     const previous = yield* Ref.get(stateRef);
-    yield* publish(previous.map((source) => (source.id === input.sourceId ? snapshot : source)));
+    yield* publish(previous.map((source) => (source.id === sourceId ? snapshot : source)));
+  });
+
+  // Shares the refresh lock so a stale in-flight read cannot overwrite a redemption.
+  const consumeResetCredit = Effect.fn("UsageLimitSources.consumeResetCredit")(function* (
+    input: UsageLimitSourceConsumeResetCreditInput,
+  ) {
+    const { config, hub } = yield* hubFor(input.sourceId);
+    const result = yield* api.consume(hub, input.accountId, input.creditId);
+    yield* republish(input.sourceId, config);
     return result;
+  }, refreshLock.withPermits(1));
+
+  const setPriority = Effect.fn("UsageLimitSources.setPriority")(function* (input: {
+    readonly sourceId: UsageLimitSourceId;
+    readonly accountId: string;
+    readonly priority: number;
+  }) {
+    const { config, hub } = yield* hubFor(input.sourceId);
+    yield* api.setPriority(hub, input.accountId, input.priority);
+    yield* republish(input.sourceId, config);
   }, refreshLock.withPermits(1));
 
   yield* settingsService.streamChanges.pipe(
@@ -194,6 +218,7 @@ export const make = Effect.gen(function* () {
   return {
     current: Ref.get(stateRef),
     consumeResetCredit,
+    setPriority,
     refresh,
     get streamChanges() {
       return Stream.unwrap(

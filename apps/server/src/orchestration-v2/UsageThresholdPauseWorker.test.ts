@@ -31,6 +31,7 @@ import {
   thresholdCrossings,
   usageReadings,
 } from "./UsageThresholdPauseWorker.ts";
+import { runUsagePauseScript, type ScriptRun } from "./usagePauseScript.ts";
 
 const settings = (
   overrides: Partial<UsageThresholdPauseSettings> = {},
@@ -41,6 +42,8 @@ const settings = (
   aggregation: "pooled",
   drivers: [],
   accountIds: [],
+  mode: "rules",
+  script: "",
   ...overrides,
 });
 
@@ -158,6 +161,93 @@ describe("resumeAtByDriver", () => {
   });
 });
 
+describe("runUsagePauseScript", () => {
+  const run = (runId: string, provider: string): ScriptRun => ({
+    runId,
+    threadId: `thread:${runId}`,
+    title: runId,
+    projectId: "project",
+    project: "Project",
+    workspaceRoot: "/repo",
+    provider,
+    providerInstanceId: provider,
+    model: "model",
+    delegated: false,
+    parentThreadId: null,
+    startedAt: "2026-11-16T10:00:00.000Z",
+    runningMinutes: 5,
+  });
+  const input = {
+    usage: [
+      {
+        provider: "claudeAgent",
+        accountId: "a",
+        account: "a",
+        kind: "weekly",
+        window: "Weekly",
+        windowId: "seven_day",
+        remainingPercent: 10,
+        usedPercent: 90,
+        resetsAt: "2026-11-20T00:00:00.000Z",
+        priority: 2,
+      },
+    ],
+    runs: [run("one", "claudeAgent"), run("two", "codex")],
+    nowMs: Date.parse("2026-11-16T10:05:00.000Z"),
+  };
+
+  it("returns the chosen runs and keeps state between calls", () => {
+    const script = `
+      state.calls = (state.calls ?? 0) + 1;
+      const low = usage.filter((w) => w.remainingPercent <= 20).map((w) => w.provider);
+      return runs
+        .filter((r) => low.includes(r.provider))
+        .map((r) => ({ runId: r.runId, resumeAt: state.calls > 1 ? null : new Date(now.getTime() + 60000) }));
+    `;
+    const first = runUsagePauseScript(script, input, "{}");
+    assert.deepEqual(first.stops, [{ runId: "one", resumeAt: "2026-11-16T10:06:00.000Z" }]);
+    const second = runUsagePauseScript(script, input, first.stateJson);
+    assert.deepEqual(second.stops, [{ runId: "one", resumeAt: null }]);
+    assert.deepEqual(JSON.parse(second.stateJson), { calls: 2 });
+  });
+
+  it("reports the last priority per account and the shortest re-check", () => {
+    const decided = runUsagePauseScript(
+      `setPriority("a", 2); setPriority("a", 0); setPriority("b", 1);
+       checkAgainIn(120); checkAgainIn(75); checkAgainIn("soon");`,
+      input,
+      "{}",
+    );
+    assert.deepEqual(decided.priorities, [
+      { accountId: "a", priority: 0 },
+      { accountId: "b", priority: 1 },
+    ]);
+    assert.equal(decided.checkAgainInSeconds, 75);
+    assert.throws(
+      () => runUsagePauseScript(`setPriority("a", 1.5)`, input, "{}"),
+      "Expected an integer",
+    );
+  });
+
+  it("fails on errors, endless loops, bad results and eval", () => {
+    for (const [script, message] of [
+      ["throw new Error('nope')", "nope"],
+      ["while (true) {}", "timed out"],
+      ["return 'one'", "Return an array"],
+      ["return [{ runId: 'one', resumeAt: 'soon' }]", "resumeAt is not a time"],
+      ["return eval('runs')", "Code generation from strings disallowed"],
+    ] as const) {
+      assert.throws(() => runUsagePauseScript(script, input, "{}"), message);
+    }
+  });
+
+  it("sees no host globals", () => {
+    const script =
+      "return typeof process === 'undefined' && typeof require === 'undefined' ? [] : runs";
+    assert.deepEqual(runUsagePauseScript(script, input, "{}").stops, []);
+  });
+});
+
 it.effect("stops the crossed provider's running threads and continues them at reset", () =>
   Effect.gen(function* () {
     const startMs = Date.parse("2026-11-16T10:00:00.000Z");
@@ -202,18 +292,20 @@ it.effect("stops the crossed provider's running threads and continues them at re
           Scheduler.layer,
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
             listLiveRuns: () =>
-              Effect.succeed([
-                {
-                  threadId: ThreadId.make("thread:claude"),
-                  runId: RunId.make("run:claude"),
-                  providerInstanceId: ProviderInstanceId.make("claude"),
-                },
-                {
-                  threadId: ThreadId.make("thread:codex"),
-                  runId: RunId.make("run:codex"),
-                  providerInstanceId: ProviderInstanceId.make("codex"),
-                },
-              ]),
+              Effect.succeed(
+                (["claude", "codex"] as const).map((name) => ({
+                  threadId: ThreadId.make(`thread:${name}`),
+                  runId: RunId.make(`run:${name}`),
+                  providerInstanceId: ProviderInstanceId.make(name),
+                  title: name,
+                  projectId: "project",
+                  projectTitle: null,
+                  workspaceRoot: null,
+                  model: null,
+                  parentThreadId: null,
+                  startedAt: "2026-11-16T10:00:00.000Z",
+                })),
+              ),
             listUsagePausedThreads: () => Ref.get(paused),
           }),
           Layer.mock(ThreadManagement.ThreadManagementService)({

@@ -276,6 +276,25 @@ their queues, and continues them when the window resets. Choose **Don't
 continue automatically** in a paused thread to keep it stopped, or press
 **Resume** to continue early.
 
+If the settings don't fit your setup, set **Decide with** to **Script** and
+write a JavaScript function body instead. Every few seconds it gets `usage`
+(each account's usage windows), `runs` (the agents running now), `now`, and a
+`state` object it can keep notes in, and returns the runs to stop. Return
+`{ runId, resumeAt, message }` to choose when a run continues (`null` for
+never) and what its stop message says; otherwise it continues when its
+provider's tightest window resets. The built-in "once per window" rule does not
+apply, so a script that keeps returning a run stops it again after you resume
+it; use `state` to remember what you already stopped. The script runs on the
+server with no file or network access and a short time limit. Errors stop
+nothing and are written to the server log.
+
+For CLIProxyAPI accounts, `usage` also carries each account's routing
+`priority`, and the script can call `setPriority(accountId, n)` to change it
+(higher is preferred), for example to move traffic to a second subscription
+before the first runs out instead of stopping agents. Usage is re-read on the
+provider refresh interval; call `checkAgainIn(seconds)` near a threshold to
+re-read sooner, at most once every 75 seconds.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 On mobile, open a subagent from its conversation card or **Agents**. On iOS
 layouts with an inspector, its thread opens beside the parent. Maximize it to
