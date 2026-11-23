@@ -9,7 +9,8 @@ import {
   type UsageLimitsReport,
   type UsageThresholdPauseSettings,
 } from "@t3tools/contracts";
-import { collectDriverUsageLimits, limitsNotice } from "@t3tools/shared/usageLimits";
+import { collectDriverUsageLimits } from "@t3tools/shared/usageLimits";
+import { limitsNotice } from "@t3tools/shared/usageLimitsCopy";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

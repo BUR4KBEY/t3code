@@ -80,6 +80,8 @@ export const UsageLimitSourceAccount = Schema.Struct({
   workspaceId: Schema.optional(TrimmedNonEmptyString),
   /** CLIProxyAPI routing priority; higher is preferred, 0 when the hub reports none. */
   priority: Schema.optional(Schema.Int),
+  /** The models the hub routes to this account. */
+  models: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   usageLimits: ServerProviderUsageLimits,
 });
 export type UsageLimitSourceAccount = typeof UsageLimitSourceAccount.Type;

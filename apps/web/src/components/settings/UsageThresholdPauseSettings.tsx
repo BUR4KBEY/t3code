@@ -30,7 +30,7 @@ import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
@@ -147,6 +147,7 @@ function RemainingPercentField(props: {
 }
 
 export function UsageThresholdPauseRows() {
+  const searchableSetting = useSearchableSetting();
   const pause = useScopedSettings((settings) => settings.usageThresholdPause);
   const updateSettings = useUpdateScopedSettings();
   const { connectedEnvironments } = useSettingsScope();
@@ -178,7 +179,7 @@ export function UsageThresholdPauseRows() {
         resetAction={
           !Equal.equals(pause, DEFAULT_UNIFIED_SETTINGS.usageThresholdPause) ? (
             <SettingResetButton
-              label="usage threshold pause"
+              ariaLabel="Reset usage threshold pause to default"
               onClick={() =>
                 updateSettings({
                   usageThresholdPause: DEFAULT_UNIFIED_SETTINGS.usageThresholdPause,
