@@ -293,7 +293,13 @@ it.effect("stops the crossed provider's running threads and continues them at re
           Layer.mock(ProjectionStore.ProjectionStoreV2)({
             listLiveRuns: () =>
               Effect.succeed(
-                (["claude", "codex"] as const).map((name) => ({
+                (
+                  [
+                    ["claude", null],
+                    ["codex", null],
+                    ["omp", "anthropic/claude-opus-5-5"],
+                  ] as const
+                ).map(([name, model]) => ({
                   threadId: ThreadId.make(`thread:${name}`),
                   runId: RunId.make(`run:${name}`),
                   providerInstanceId: ProviderInstanceId.make(name),
@@ -301,7 +307,7 @@ it.effect("stops the crossed provider's running threads and continues them at re
                   projectId: "project",
                   projectTitle: null,
                   workspaceRoot: null,
-                  model: null,
+                  model,
                   parentThreadId: null,
                   startedAt: "2026-11-16T10:00:00.000Z",
                 })),
@@ -319,6 +325,11 @@ it.effect("stops the crossed provider's running threads and continues them at re
             getProviders: Effect.succeed([
               { instanceId: "claude", driver: claude, enabled: false } as never,
               { instanceId: "codex", driver: codex, enabled: false } as never,
+              {
+                instanceId: "omp",
+                driver: ProviderDriverKind.make("acpRegistry"),
+                enabled: false,
+              } as never,
             ]),
           }),
           Layer.mock(UsageLimitSources.UsageLimitSources)({
@@ -339,6 +350,15 @@ it.effect("stops the crossed provider's running threads and continues them at re
         usagePause: { runId: RunId.make("run:claude"), resumeAt: resetAt },
       });
       assert.deepInclude(stop, { type: "thread.stop", threadId: ThreadId.make("thread:claude") });
+      // An ACP agent reports no usage of its own; its "anthropic/" model draws on Claude's.
+      assert.deepInclude(yield* Queue.take(dispatched), {
+        type: "thread.metadata.update",
+        threadId: ThreadId.make("thread:omp"),
+      });
+      assert.deepInclude(yield* Queue.take(dispatched), {
+        type: "thread.stop",
+        threadId: ThreadId.make("thread:omp"),
+      });
       // Still below the threshold: nothing more is stopped, so work the user starts now runs.
       yield* TestClock.adjust("30 seconds");
       assert.equal(yield* Queue.size(dispatched), 0);
