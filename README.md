@@ -54,6 +54,7 @@ Behavior worth knowing:
 
 - A window that is already below the threshold when the server starts, or when you turn the setting on, does not fire. The above/below state lives in memory, so a crossing that happens while the server is down is missed.
 - CLIProxyAPI rotates accounts, so T3 cannot tell which account a thread uses. A crossing stops every thread on that provider, even in per-account mode.
+- An agent whose own provider reports no usage, such as omp or another ACP agent, counts against the provider its model id names: `anthropic/…` against Claude, `openai/…` against Codex. A model id without that prefix is never stopped by the settings; use a script for those.
 - With no known reset time the thread is not continued automatically; its stop message says to continue by hand.
 - Agents can read the setting through `t3_environment_read` but cannot change it. It was left out of `t3_environment_preferences_update` to keep `mcpToolListJsonBytes` unchanged.
 
