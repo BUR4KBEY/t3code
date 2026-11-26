@@ -14,6 +14,7 @@ import type {
   OrchestrationV2UsagePause,
   PlanId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -101,6 +102,11 @@ export interface ThreadRunSummary {
   readonly providerStartingLabel?: string;
   /** `providerStartingLabel` as a `msg()` string; display sites resolve this one. */
   readonly providerStartingLabelMsg?: string;
+  /** The starting provider, so clients can show its logo beside the label. */
+  readonly providerStarting?: {
+    readonly instanceId: ProviderInstanceId;
+    readonly driver: ProviderDriverKind;
+  };
   readonly sourcePlanRef?: {
     readonly threadId: ThreadId;
     readonly planId: PlanId;
