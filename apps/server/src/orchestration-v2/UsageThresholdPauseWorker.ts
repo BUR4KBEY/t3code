@@ -1,7 +1,7 @@
 import {
   CommandId,
   MessageId,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   type RunId,
   type ServerProvider,
   type ThreadId,
@@ -130,6 +130,27 @@ export function resumeAtByDriver(
   return byDriver;
 }
 
+const MODEL_VENDOR_DRIVERS: Readonly<Record<string, ProviderDriverKind>> = {
+  anthropic: ProviderDriverKind.make("claudeAgent"),
+  openai: ProviderDriverKind.make("codex"),
+};
+
+/**
+ * The crossing that stops a run. Wrapper drivers such as ACP agents report no usage of their own,
+ * so a "vendor/model" id falls back to the vendor's subscription limits.
+ */
+function crossingForRun<T>(
+  byDriver: ReadonlyMap<ProviderDriverKind, T>,
+  driver: ProviderDriverKind | undefined,
+  model: string | null,
+): T | undefined {
+  const own = driver === undefined ? undefined : byDriver.get(driver);
+  if (own !== undefined) return own;
+  const vendor = model?.split("/", 2);
+  const vendorDriver = vendor?.length === 2 ? MODEL_VENDOR_DRIVERS[vendor[0]!] : undefined;
+  return vendorDriver === undefined ? undefined : byDriver.get(vendorDriver);
+}
+
 /** The reset of the provider's tightest window, which is what most likely made the script stop. */
 function defaultResumeAt(
   usage: ReadonlyArray<ScriptUsageWindow>,
@@ -206,8 +227,7 @@ const makeSweep = Effect.gen(function* () {
     const byDriver = resumeAtByDriver(crossings);
     const driverOf = new Map(providers.map((provider) => [provider.instanceId, provider.driver]));
     for (const run of yield* projections.listLiveRuns()) {
-      const driver = driverOf.get(run.providerInstanceId);
-      const crossing = driver === undefined ? undefined : byDriver.get(driver);
+      const crossing = crossingForRun(byDriver, driverOf.get(run.providerInstanceId), run.model);
       if (crossing === undefined) continue;
       yield* stopRun(
         run,
